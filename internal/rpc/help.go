@@ -2,6 +2,7 @@ package rpc
 
 import (
 	"context"
+	"go.uber.org/zap"
 	"strings"
 	"time"
 
@@ -128,15 +129,24 @@ func (r *Router) onHelpGetConfig(ctx context.Context) (*tg.Config, error) {
 		return config, nil
 	}
 	if svc, ok := r.deps.Account.(accountReactionSettingsReader); ok {
+
 		settings, err := svc.GetReactionSettings(ctx, userID)
+
 		if err != nil {
-			return nil, internalErr()
+
+			// The default reaction is a cosmetic preference, not a reason to
+			// fail the whole config: help.getConfig is the first call every
+			// client makes, and a 500 here leaves it without a DC list at all,
+			// so it can never log in. The default set by BuildConfig stands.
+
+			r.log.Warn("get reaction settings failed, keeping default reaction", zap.Error(err))
+
+		} else if reaction := tgMessageReaction(settings.DefaultReaction); reaction != nil {
+
+			config.SetReactionsDefault(reaction)
+
 		}
-		reaction := tgMessageReaction(settings.DefaultReaction)
-		if reaction == nil {
-			return nil, internalErr()
-		}
-		config.SetReactionsDefault(reaction)
+
 	}
 	return config, nil
 }
