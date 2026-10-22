@@ -8,6 +8,12 @@ var (
 	ErrMessageAuthorRequired = errors.New("message author required")
 	ErrMessageNotModified    = errors.New("message not modified")
 	ErrMessageNotReadYet     = errors.New("message not read yet")
+	// ErrFactCheckInvalid 表示事实核查标签本身不合法（空文本、非法国家码）。
+	ErrFactCheckInvalid = errors.New("fact check invalid")
+	// ErrFactCheckTooLong 表示事实核查结论文本超过客户端上限。
+	ErrFactCheckTooLong = errors.New("fact check text too long")
+	// ErrFactCheckForbidden 表示当前用户无权改写这条消息的事实核查标签。
+	ErrFactCheckForbidden = errors.New("fact check forbidden")
 	// ErrPeerDeleted rejects a private write whose recipient is an account
 	// tombstone. The rows survive for history, so only this gate stops the
 	// message from landing in a dialog nobody can read.

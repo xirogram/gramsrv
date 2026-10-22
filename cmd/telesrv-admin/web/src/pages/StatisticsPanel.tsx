@@ -3,10 +3,8 @@ import {
   Gift,
   Maximize2,
   Minimize2,
-  Radio,
   RefreshCw,
-  Star,
-  Users
+  Star
 } from "lucide-react";
 import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
 import { api } from "../api";
@@ -14,16 +12,37 @@ import { Alert } from "../components/ui";
 import { useI18n } from "../i18n";
 import type { StatsDailyCountPoint, StatsDailyStarPoint, StatsResponse } from "../types";
 
-const RANGES = [7, 14, 30, 90] as const;
+// The statistics half of the overview. It was a page of its own at
+// /statistics; folding it in here means one page to read instead of two that
+// answered the same question ("how is the server doing") at different refresh
+// rates, and it drops the duplicate Users/Online tiles the overview already
+// showed.
+//
+// It keeps its own poller rather than sharing the dashboard's: /api/stats runs
+// four generate_series aggregates and is refreshed once a minute, while
+// /api/dashboard is a set of counters on a 15s tick. Merging the components
+// must not merge their cost.
+
+export const STATS_RANGES = [7, 14, 30, 90] as const;
+
 type ChartKey = "users" | "active" | "stars";
 
-export function StatisticsPage() {
+export type StatsState = {
+  data: StatsResponse | null;
+  days: number;
+  setDays: (days: number) => void;
+  loading: boolean;
+  error: string;
+  refresh: () => void;
+};
+
+export function useStats(): StatsState {
   const { t } = useI18n();
   const [data, setData] = useState<StatsResponse | null>(null);
   const [days, setDays] = useState<number>(14);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [expanded, setExpanded] = useState<ChartKey | null>(null);
+  const [nonce, setNonce] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -49,91 +68,133 @@ export function StatisticsPage() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [days, t]);
+  }, [days, t, nonce]);
+
+  return {
+    data,
+    days,
+    setDays,
+    loading,
+    error,
+    refresh: () => setNonce((value) => value + 1)
+  };
+}
+
+// StatsStrip renders the economy figures and the three daily charts. It is a
+// self-contained block so the overview page controls only the grid around it.
+// The two halves are exported separately because the overview gives the economy
+// row its own panel and lets the charts fill whatever height is left.
+export function StatsStrip({ stats }: { stats: StatsState }) {
+  return (
+    <>
+      <StatsEconomy stats={stats} />
+      <StatsCharts stats={stats} />
+    </>
+  );
+}
+
+export function StatsEconomy({ stats }: { stats: StatsState }) {
+  const { t } = useI18n();
+  const data = stats.data;
+  if (!data) {
+    return (
+      <>
+        <div className="dashboard-section-title">{t("stats.sectionStars")}</div>
+        <div className="overview-tiles overview-tiles--tight">
+          <StatTile icon={<Star />} label={t("stats.starsToday")} value="…" />
+          <StatTile icon={<Gift />} label={t("stats.giftsToday")} value="…" />
+          <StatTile icon={<Database />} label={t("stats.balanceTotal")} value="…" />
+          <StatTile icon={<Star />} label={t("stats.avgBalance")} value="…" />
+        </div>
+      </>
+    );
+  }
+  return (
+    <>
+      <div className="dashboard-section-title">{t("stats.sectionStars")}</div>
+      <div className="overview-tiles overview-tiles--tight">
+        <StatTile icon={<Star />} label={t("stats.starsToday")} value={formatNumber(data.stars_given_today)} />
+        <StatTile icon={<Gift />} label={t("stats.giftsToday")} value={formatNumber(data.gifts_sent_today)} />
+        <StatTile icon={<Database />} label={t("stats.balanceTotal")} value={formatNumber(data.star_balance_total)} />
+        <StatTile icon={<Star />} label={t("stats.avgBalance")} value={formatNumber(data.users_total > 0 ? Math.round(data.star_balance_total / data.users_total) : 0)} />
+      </div>
+    </>
+  );
+}
+
+export function StatsCharts({ stats }: { stats: StatsState }) {
+  const { t } = useI18n();
+  const [expanded, setExpanded] = useState<ChartKey | null>(null);
+  const data = stats.data;
+
+  if (!data) {
+    return <div className="stats-grid" />;
+  }
 
   return (
-    <div className="dashboard-layout">
-      {error && <Alert>{error}</Alert>}
-
-      <div className="stacked-toolbar">
-        <div className="segmented" role="group" aria-label={t("stats.daysLabel")}>
-          {RANGES.map((d) => (
-            <button
-              key={d}
-              type="button"
-              className={`segmented-option ${d === days ? "active" : ""}`}
-              onClick={() => setDays(d)}
-            >
-              {d}
-            </button>
-          ))}
-        </div>
-        <button
-          type="button"
-          className="btn ghost icon-text"
-          onClick={() => {
-            setLoading(true);
-            void api.stats(days).then(setData).catch((err) => setError(err instanceof Error ? err.message : t("stats.loadError"))).finally(() => setLoading(false));
-          }}
-        >
-          <RefreshCw size={14} className={loading ? "spin" : undefined} />
-          {t("stats.refresh")}
-        </button>
-      </div>
-
-      <Section title={t("stats.sectionStars")}>
-        <StatTile icon={<Star />} label={t("stats.starsToday")} value={data ? formatNumber(data.stars_given_today) : "…"} />
-        <StatTile icon={<Gift />} label={t("stats.giftsToday")} value={data ? formatNumber(data.gifts_sent_today) : "…"} />
-        <StatTile icon={<Star />} label={t("stats.starsTotal")} value={data ? formatNumber(data.stars_given_total) : "…"} />
-        <StatTile icon={<Gift />} label={t("stats.giftsTotal")} value={data ? formatNumber(data.gifts_sent_total) : "…"} />
-        <StatTile icon={<Database />} label={t("stats.balanceTotal")} value={data ? formatNumber(data.star_balance_total) : "…"} />
-        <StatTile icon={<Star />} label={t("stats.avgBalance")} value={data ? formatNumber(data.users_total > 0 ? Math.round(data.star_balance_total / data.users_total) : 0) : "…"} />
-      </Section>
-
-      <Section title={t("stats.sectionUsers")}>
-        <StatTile icon={<Users />} label={t("stats.usersTotal")} value={data ? formatNumber(data.users_total) : "…"} />
-        <StatTile icon={<Radio />} label={t("stats.onlineNow")} value={data ? formatNumber(data.online_now) : "…"} />
-      </Section>
-
-      {data && (
-        <div className="dashboard-section">
-          <div className="dashboard-section-title">{t("stats.sectionCharts")}</div>
-          <div className={`stats-grid ${expanded ? "expanded" : ""}`}>
-            {(!expanded || expanded === "users") && (
-              <ChartCard
-                title={t("stats.chartUsers")}
-                expanded={expanded === "users"}
-                onToggle={() => setExpanded(expanded === "users" ? null : "users")}
-                line={<LineChart points={data.users_chart} color="var(--brand-2)" />}
+    <>
+      <div className="dashboard-section-title">
+        {t("stats.sectionCharts")}
+        <div className="stacked-toolbar stacked-toolbar--inline">
+          <div className="segmented" role="group" aria-label={t("stats.daysLabel")}>
+            {STATS_RANGES.map((d) => (
+              <button
+                key={d}
+                type="button"
+                className={`segmented-option ${d === stats.days ? "active" : ""}`}
+                onClick={() => stats.setDays(d)}
               >
-                <BarChart points={data.users_chart} color="var(--brand-2)" />
-              </ChartCard>
-            )}
-            {(!expanded || expanded === "active") && (
-              <ChartCard
-                title={t("stats.chartActive")}
-                expanded={expanded === "active"}
-                onToggle={() => setExpanded(expanded === "active" ? null : "active")}
-                line={<LineChart points={data.active_chart} color="var(--good)" />}
-              >
-                <BarChart points={data.active_chart} color="var(--good)" />
-              </ChartCard>
-            )}
-            {(!expanded || expanded === "stars") && (
-              <ChartCard
-                title={t("stats.chartStars")}
-                hint={t("stats.chartStarsHint")}
-                expanded={expanded === "stars"}
-                onToggle={() => setExpanded(expanded === "stars" ? null : "stars")}
-                line={<StarsLineChart points={data.stars_chart} />}
-              >
-                <StarsChart points={data.stars_chart} />
-              </ChartCard>
-            )}
+                {d}
+              </button>
+            ))}
           </div>
+          <button
+            type="button"
+            className="btn ghost icon-text"
+            onClick={stats.refresh}
+            disabled={stats.loading}
+            aria-label={t("stats.refresh")}
+            title={t("stats.refresh")}
+          >
+            <RefreshCw size={14} className={stats.loading ? "spin" : undefined} />
+          </button>
         </div>
-      )}
-    </div>
+      </div>
+      {stats.error && <Alert>{stats.error}</Alert>}
+      <div className={`stats-grid ${expanded ? "expanded" : ""}`}>
+        {(!expanded || expanded === "users") && (
+          <ChartCard
+            title={t("stats.chartUsers")}
+            expanded={expanded === "users"}
+            onToggle={() => setExpanded(expanded === "users" ? null : "users")}
+            line={<LineChart points={data.users_chart} color="var(--brand-2)" />}
+          >
+            <BarChart points={data.users_chart} color="var(--brand-2)" />
+          </ChartCard>
+        )}
+        {(!expanded || expanded === "active") && (
+          <ChartCard
+            title={t("stats.chartActive")}
+            expanded={expanded === "active"}
+            onToggle={() => setExpanded(expanded === "active" ? null : "active")}
+            line={<LineChart points={data.active_chart} color="var(--good)" />}
+          >
+            <BarChart points={data.active_chart} color="var(--good)" />
+          </ChartCard>
+        )}
+        {(!expanded || expanded === "stars") && (
+          <ChartCard
+            title={t("stats.chartStars")}
+            hint={t("stats.chartStarsHint")}
+            expanded={expanded === "stars"}
+            onToggle={() => setExpanded(expanded === "stars" ? null : "stars")}
+            line={<StarsLineChart points={data.stars_chart} />}
+          >
+            <StarsChart points={data.stars_chart} />
+          </ChartCard>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -141,21 +202,9 @@ function formatNumber(value: number): string {
   return (value ?? 0).toLocaleString();
 }
 
-function Section({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
-  return (
-    <div className="dashboard-section">
-      <div className="dashboard-section-title">
-        {title}
-        {hint && <span>{hint}</span>}
-      </div>
-      <div className="dashboard-grid">{children}</div>
-    </div>
-  );
-}
-
 function StatTile({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
   return (
-    <div className="stat-tile">
+    <div className="stat-tile stat-tile--compact">
       <div className="stat-tile-head">
         <span className="stat-tile-icon">{icon}</span>
       </div>
@@ -293,6 +342,23 @@ function StarsChart({ points }: { points: StatsDailyStarPoint[] }) {
   );
 }
 
+// chartXY is the one projection every line chart shares: a data point becomes a
+// coordinate inside the 100x100 viewBox the SVGs are drawn in. The bar and line
+// variants used to carry their own copy of this arithmetic, which is how the
+// expanded line view and the collapsed bars could silently drift apart.
+function chartXY(index: number, count: number, value: number, max: number, pad: number): [number, number] {
+  const x = count <= 1 ? 50 : pad + (index / (count - 1)) * (100 - pad * 2);
+  const y = 100 - pad - (value / max) * (100 - pad * 2);
+  return [x, y];
+}
+
+function seriesLine<T>(points: T[], pick: (point: T) => number, max: number, pad: number): string {
+  const n = points.length;
+  return points
+    .map((p, i) => chartXY(i, n, pick(p), max, pad).map((v) => v.toFixed(2)).join(","))
+    .join(" ");
+}
+
 // LineChart renders a filled-area line chart (SVG) used for the expanded,
 // full-width view of a single-series statistic (users / active).
 function LineChart({ points, color }: { points: StatsDailyCountPoint[]; color: string }) {
@@ -301,22 +367,14 @@ function LineChart({ points, color }: { points: StatsDailyCountPoint[]; color: s
   const max = useMemo(() => Math.max(1, ...points.map((p) => p.value)), [points]);
   const [tip, setTip] = useState<HoverTip>(null);
 
-  const W = 100;
-  const H = 100;
   const P = 5;
-  const n = points.length;
-  const xy = (i: number, v: number, m: number): [number, number] => [
-    n <= 1 ? W / 2 : P + (i / (n - 1)) * (W - P * 2),
-    H - P - (v / m) * (H - P * 2)
-  ];
-
-  const line = points.map((p, i) => xy(i, p.value, max).join(",")).join(" ");
-  const area = `${P},${H - P} ${line} ${W - P},${H - P} ${P},${H - P}`;
+  const line = seriesLine(points, (p) => p.value, max, P);
+  const area = `${P},${100 - P} ${line} ${100 - P},${100 - P} ${P},${100 - P}`;
 
   return (
     <div className="chart">
       <div className="chart-bars">
-        <svg className="chart-line-svg" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+        <svg className="chart-line-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
           <defs>
             <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor={color} stopOpacity="0.28" />
@@ -357,23 +415,15 @@ function StarsLineChart({ points }: { points: StatsDailyStarPoint[] }) {
   const maxGifts = useMemo(() => Math.max(1, ...points.map((p) => p.gifts)), [points]);
   const [tip, setTip] = useState<HoverTip>(null);
 
-  const W = 100;
-  const H = 100;
   const P = 5;
-  const n = points.length;
-  const xy = (i: number, v: number, m: number): [number, number] => [
-    n <= 1 ? W / 2 : P + (i / (n - 1)) * (W - P * 2),
-    H - P - (v / m) * (H - P * 2)
-  ];
-
-  const starsLine = points.map((p, i) => xy(i, p.stars, maxStars).join(",")).join(" ");
-  const starsArea = `${P},${H - P} ${starsLine} ${W - P},${H - P} ${P},${H - P}`;
-  const giftsLine = points.map((p, i) => xy(i, p.gifts, maxGifts).join(",")).join(" ");
+  const starsLine = seriesLine(points, (p) => p.stars, maxStars, P);
+  const starsArea = `${P},${100 - P} ${starsLine} ${100 - P},${100 - P} ${P},${100 - P}`;
+  const giftsLine = seriesLine(points, (p) => p.gifts, maxGifts, P);
 
   return (
     <div className="chart chart-dual">
       <div className="chart-bars">
-        <svg className="chart-line-svg" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none">
+        <svg className="chart-line-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
           <defs>
             <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="var(--brand-2)" stopOpacity="0.28" />

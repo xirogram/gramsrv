@@ -71,6 +71,7 @@ import (
 	"telesrv/internal/app/userprojection"
 	"telesrv/internal/app/users"
 	verificationapp "telesrv/internal/app/verification"
+	walletapp "telesrv/internal/app/wallet"
 	welcomemessagesapp "telesrv/internal/app/welcomemessages"
 	"telesrv/internal/botapi"
 	"telesrv/internal/branding"
@@ -597,11 +598,42 @@ func webPagePreviewOption(cfg config.Config) filesapp.Option {
 	return filesapp.WithWebPagePreview(cfg.WebPagePreviewMaxBytes, cfg.WebPagePreviewRatePerMin)
 }
 
+// logConfigDrift 在启动时比对 .env 与 .env.example，只报告、不改写：
+//
+//   - INFO「模板里声明、但本机没设」——多半是刻意走默认值，但「新版本加了配置、
+//     .env 还是旧的」这类遗漏也在这里，所以给个可核对的清单；
+//   - WARN「.env 里有、模板没收录」——几乎必然是键名笔误或模板滞后：readEnvFile
+//     接受任意 TELESRV_* 键名，而 Load 只查询认识的键，笔误值会被静默忽略。
+//
+// 模板缺失（生产镜像不带 .env.example）时 DetectEnvDrift 返回零值，静默跳过。
+// 刻意不自动补写 .env：容器是 read-only rootfs，且静默改运维的配置文件比漏报更糟。
+func logConfigDrift(logger *zap.Logger) {
+	drift, err := config.DetectEnvDrift()
+	if err != nil {
+		logger.Warn("配置漂移比对失败（不影响启动）", zap.Error(err))
+		return
+	}
+	if len(drift.Missing) == 0 && len(drift.Unknown) == 0 {
+		return
+	}
+	if len(drift.Missing) > 0 {
+		logger.Info(".env.example 声明但本机未设置，正使用代码默认值",
+			zap.Int("count", len(drift.Missing)),
+			zap.Strings("keys", drift.Missing))
+	}
+	if len(drift.Unknown) > 0 {
+		logger.Warn(".env 中的键未被 .env.example 收录：可能是键名笔误或模板滞后，笔误值会被静默忽略",
+			zap.Int("count", len(drift.Unknown)),
+			zap.Strings("keys", drift.Unknown))
+	}
+}
+
 func run(logger *zap.Logger) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}
+	logConfigDrift(logger)
 	if err := branding.Configure(cfg.Branding); err != nil {
 		return fmt.Errorf("configure branding: %w", err)
 	}
@@ -611,6 +643,15 @@ func run(logger *zap.Logger) error {
 	if !domain.ConfigurePremiumBotUsername(cfg.PremiumBotUsername) {
 		return fmt.Errorf("configure Premium bot username %q", cfg.PremiumBotUsername)
 	}
+	// 手机号格式策略必须在 store / RPC service 构造前安装：login identity 的
+	// 规范化结果会落进 users.phone，策略切换不能留下半规范化数据。
+	domain.ConfigurePhoneFormatCheck(cfg.CheckNumberFormat)
+	logger.Info("手机号格式策略",
+		zap.Bool("check_number_format", cfg.CheckNumberFormat),
+		zap.Bool("strict", domain.PhoneFormatCheckEnabled()))
+	// SCAM/FAKE 警告文案（空白 → domain 内置英文默认值）：启动时写入一次，
+	// getFullUser / channels.getFullChannel / 邀请预览的 About 投影都会读取。
+	domain.SetModerationProfileWarning(cfg.ScamProfileWarning, cfg.FakeProfileWarning)
 	// 服务器身份由管理面板（Server Settings → Server identity）在
 	// cfg.IdentityDir 下维护；这里启动时读取一次自定义服务器名，用作 777000 官方
 	// 系统账号的展示名与登录通知 {{server_name}} 占位符（见
@@ -1523,29 +1564,47 @@ func run(logger *zap.Logger) error {
 			logger.Info("TON Proof gift claim (test) enabled", zap.String("url", cfg.StarGiftClaimTestPublicBaseURL), zap.String("bot", "@claimtest"))
 		}
 	}
-	// Crypto donations (deposit -> Stars): works out of the box, no manual
-	// setup step. The encryption key is a local file, generated the first
-	// time the server ever runs (same pattern as the RSA key below) unless
-	// TELESRV_DONATION_WALLET_KEY overrides it with a literal key; the
-	// wallet mnemonic itself is generated and stored, encrypted, the first
-	// time the server finds none in the database. See docs/donations.md.
-	donationWalletKey, err := donationsWalletKey(cfg)
-	if err != nil {
-		return fmt.Errorf("init donations wallet key: %w", err)
-	}
+	// Crypto donations (deposit -> Stars): OFF unless TELESRV_DONATIONS_ENABLED
+	// says otherwise.
+	//
+	// It used to be on by default, which was wrong twice over. The wallet was
+	// provisioned on first boot of every deployment -- a real custodial BIP39
+	// mnemonic, a data/donation_wallet.key, and a warning about backing it up,
+	// created for a feature the operator had not asked for and could not use.
+	// And the seeded registry enabled the local Ganache chain, so every boot
+	// then dialled 127.0.0.1:7545, failed, and logged an ERROR for a chain
+	// that does not exist outside a developer's laptop.
+	//
+	// The service object is still constructed and still handed to the bot and
+	// the admin service, because both already treat it as optional: the bot's
+	// /deposit answers from a nil source, and the admin Donations page renders
+	// "not provisioned" against an empty chain list rather than erroring. That
+	// is deliberate -- an operator who has not enabled the feature can still
+	// read what it would take, without the server having quietly taken custody
+	// of anything.
 	donationStore := postgres.NewDonationStore(pool)
-	donationsService, err := donationsapp.NewService(ctx, donationStore, donationWalletKey)
-	if err != nil {
-		return fmt.Errorf("init donations service: %w", err)
-	}
-	if !donationsService.Ready() {
-		if _, err := donationsService.EnsureWallet(ctx); err != nil {
-			return fmt.Errorf("provision donations wallet: %w", err)
+	donationsService, donationsDeps := (*donationsapp.Service)(nil), adminapp.DonationsService(nil)
+	if cfg.DonationsEnabled {
+		donationWalletKey, err := donationsWalletKey(cfg)
+		if err != nil {
+			return fmt.Errorf("init donations wallet key: %w", err)
 		}
-		logger.Warn("generated a new crypto donations wallet -- recovery phrase stored encrypted, back up data/donation_wallet.key")
+		donationsService, err = donationsapp.NewService(ctx, donationStore, donationWalletKey)
+		if err != nil {
+			return fmt.Errorf("init donations service: %w", err)
+		}
+		if !donationsService.Ready() {
+			if _, err := donationsService.EnsureWallet(ctx); err != nil {
+				return fmt.Errorf("provision donations wallet: %w", err)
+			}
+			logger.Warn("generated a new crypto donations wallet -- recovery phrase stored encrypted, back up data/donation_wallet.key")
+		}
+		botsService.SetDonationsSource(donationsService)
+		donationsService.SetNotifier(botsService)
+		donationsDeps = donationsService
+	} else {
+		logger.Info("crypto donations disabled; set TELESRV_DONATIONS_ENABLED=true and enable a chain to turn it on")
 	}
-	botsService.SetDonationsSource(donationsService)
-	donationsService.SetNotifier(botsService)
 	// Passkey:凭据持久化走 postgres;一次性挑战走进程内内存(短 TTL,与 QR 登录 token
 	// 同属进程内一次性凭据,不跨实例)。
 	passkeyStore := postgres.NewPasskeyStore(pool)
@@ -1815,6 +1874,39 @@ func run(logger *zap.Logger) error {
 	} else {
 		logger.Info("会话地理归属未启用：account.getAuthorizations 继续回传 Unknown 占位文案")
 	}
+	// Layer 230 应用内 TON 钱包。显式配置启用:挑战/绑定状态只在本地 data/wallet,
+	// 余额来自 telesrv 自己的 TON 账本。provider(toncenter)默认不配置,因此
+	// toncenter.* 与余额查询都不会联系任何外部 TON 节点。
+	var walletService rpc.WalletService
+	if cfg.WalletStateDir != "" {
+		walletStore, err := walletapp.NewFileStore(cfg.WalletStateDir)
+		if err != nil {
+			return fmt.Errorf("open wallet state directory: %w", err)
+		}
+		defer func() { _ = walletStore.Close() }()
+		var walletProvider walletapp.Provider
+		if cfg.WalletToncenterAPIKey != "" {
+			walletProvider = walletapp.NewToncenter(cfg.WalletToncenterAPIKey)
+		}
+		// 主密钥缺失时自动生成 0600 文件；没有它 telesrv 就无法保管自己生成的
+		// 钱包，inputWalletNew 会被明确拒绝而不是落一份明文私钥。
+		walletKeys, err := walletapp.LoadOrCreateKeyCipher(cfg.WalletKeyFile)
+		if err != nil {
+			return fmt.Errorf("load wallet master key: %w", err)
+		}
+		if err := walletStore.ValidateKeyCipher(walletKeys); err != nil {
+			return fmt.Errorf("validate wallet custody keys: %w", err)
+		}
+		walletService = walletapp.NewService(walletStore, walletProvider, cfg.AdvertiseIP,
+			walletapp.WithBalanceSource(walletapp.TONLedgerBalanceSource(starGiftLifecycleStore.TonBalance)),
+			walletapp.WithTransactionSource(walletapp.TONLedgerTransactionSource(starGiftLifecycleStore.TonTransactions)),
+			walletapp.WithKeyCipher(walletKeys))
+		logger.Info("应用内 TON 钱包已启用",
+			zap.String("state_dir", cfg.WalletStateDir),
+			zap.Bool("ton_provider", walletProvider != nil))
+	} else {
+		logger.Info("应用内 TON 钱包未启用：wallet.* 回 WALLET_UNAVAILABLE")
+	}
 	router := rpc.New(rpc.Config{
 		DC:                       cfg.DC,
 		DefaultCountryCode:       cfg.DefaultCountryCode,
@@ -1869,6 +1961,10 @@ func run(logger *zap.Logger) error {
 		Help: help.NewService(helpStore, helpStore,
 			help.WithMapboxToken(cfg.MapboxToken),
 			help.WithPremiumBotUsername(cfg.PremiumBotUsername),
+			// The wallet requires an explicit state directory; an empty directory is how an
+			// operator turns it off, and that is exactly when a client must be told
+			// the wallet is unavailable rather than shown an entry that cannot work.
+			help.WithWalletAvailable(walletService != nil),
 			help.WithAccountFreezeProvider(adminService)),
 		AppUpdates:                   appUpdateResolver,
 		AccountFreeze:                userProjectionFacts,
@@ -1911,6 +2007,7 @@ func run(logger *zap.Logger) error {
 		Giveaways:                    giveawayEnter,
 		Premium:                      premiumService,
 		Gifts:                        giftsService,
+		Wallet:                       walletService,
 		Passkey:                      passkeyService,
 		Themes:                       themeService,
 		GeoIP:                        geoIPResolver,
@@ -1959,7 +2056,7 @@ func run(logger *zap.Logger) error {
 		UserLookup:              userStore,
 		Account:                 accountService,
 		Photos:                  filesService,
-		Donations:               donationsService,
+		Donations:               donationsDeps,
 		Stars:                   starsService,
 		Premium:                 premiumService,
 		StarsNotifier:           router,
@@ -2133,20 +2230,38 @@ func run(logger *zap.Logger) error {
 	go router.RunInlineBotPushSubscriber(ctx)
 	go router.RunBotCallbackAnswerSubscriber(ctx)
 	go router.RunEphemeralPushSubscriber(ctx)
-	if donationsService.Ready() {
+	// Watchers only exist when the feature is switched on AND the wallet is
+	// provisioned. EnabledChains can still return a chain whose rpc_url an
+	// operator has since cleared, so each one is checked rather than dialed
+	// blind -- that was the source of a connection-refused ERROR on every boot
+	// of every server (see the seed migration's ganache row).
+	if donationsService != nil && donationsService.Ready() {
 		donationChains, err := donationsService.EnabledChains(ctx)
 		if err != nil {
 			logger.Warn("list enabled donation chains failed; no donation watchers started", zap.Error(err))
 		}
 		for _, chain := range donationChains {
 			if !chain.Watchable() {
-				continue // enabled but not yet configured (e.g. rpc_url still empty) -- an operator will fill it in
+				// Enabled but not yet configured (empty rpc_url, or no price
+				// feed). Say so once, at Warn: this is a row an operator will
+				// finish filling in, not a fault in the server.
+				logger.Named("donations").Named(chain.Key).Warn(
+					"chain is enabled but has no RPC endpoint; no watcher started", zap.String("rpc_url", chain.RPCURL))
+				continue
 			}
 			chainLog := logger.Named("donations").Named(chain.Key)
 			go func(chainKey string, log *zap.Logger) {
-				if err := donationsService.WatchChain(ctx, chainKey, cfg.DonationPollInterval, log); err != nil && !errors.Is(err, context.Canceled) {
-					log.Error("donation watcher stopped", zap.Error(err))
+				err := donationsService.WatchChain(ctx, chainKey, cfg.DonationPollInterval, log)
+				if err == nil || errors.Is(err, context.Canceled) {
+					return
 				}
+				// A watcher that stops is either the chain being unreachable
+				// or the operator misconfiguring it, and in both cases the
+				// operator has to look at it. It is a configuration problem
+				// with the deployment, not an internal failure, so it is a
+				// Warn with the chain named -- previously every boot logged
+				// an unparameterised ERROR for the seeded local chain.
+				log.Warn("donation watcher stopped", zap.Error(err))
 			}(chain.Key, chainLog)
 		}
 	}

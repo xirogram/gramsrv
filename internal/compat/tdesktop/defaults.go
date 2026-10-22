@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	appConfigHash     = 20 // app config 内容变更时必须递增，否则缓存端只会收到 notModified。
+	appConfigHash     = 21 // app config 内容变更时必须递增，否则缓存端只会收到 notModified。
 	countriesListHash = 1
 	timezonesListHash = 1
 )
@@ -60,6 +60,10 @@ func readMarkAppConfig(mapboxToken string) *tg.JSONObject {
 		// settings_display_passkeys=true：按 core.telegram.org/api/passkeys，客户端仅在
 		// 此 key 为 true 时显示 Settings→Privacy→Passkeys 注册入口；缺 key 则无人能注册。
 		{Key: "settings_display_passkeys", Value: &tg.JSONBool{Value: true}},
+		// can_edit_factcheck=true：TDesktop/WebK 据此显示「Add Fact-Check」入口；
+		// 缺 key 时 canEdit() 恒为 false，服务端实现的事实核查方法没有 UI 入口。
+		{Key: "can_edit_factcheck", Value: &tg.JSONBool{Value: true}},
+		{Key: "factcheck_length_limit", Value: &tg.JSONNumber{Value: float64(domain.MaxFactCheckTextLength)}},
 		{Key: "chatlist_update_period", Value: &tg.JSONNumber{Value: 3600}},
 		{Key: "chatlist_invites_limit_default", Value: &tg.JSONNumber{Value: 3}},
 		{Key: "chatlist_invites_limit_premium", Value: &tg.JSONNumber{Value: 20}},

@@ -9,10 +9,39 @@ Telegram-like interface.
 
 [Website](https://telesrv.net) · [OwpenGram client](https://owpengram.org/) · [Discussion group](https://t.me/telesrv_chat) · [Channel](https://t.me/telesrv) · [中文 README](README.zh-CN.md)
 
+## telesrv-flutter: our own client
+
+**From our server to our own client.**
+
+We are reimplementing the client with Flutter. Chat lists, conversations,
+messages, media, and group information are already part of a running product.
+
+![The running telesrv-flutter Windows client with folders, chats, messages, and group information](docs/assets/telesrv-flutter-windows.webp)
+
+Actual Windows application. **telesrv-flutter downloads are not yet available.**
+
+- **Our own chat organization:** folders, archived chats, unread markers, and
+  conversation search.
+- **Our own messaging experience:** message bubbles, quoted replies, pinned
+  messages, and media.
+- **Our own desktop workspace:** chats, messages, and group information side by
+  side, with layouts, themes, and window interactions we can continue to develop.
+
+Flutter powers the product interface. Our maintained TDLib fork handles
+protocol and local state, with telesrv providing the server. We can build the
+client and evolve it alongside the server to tailor an IM product to your needs.
+
+[Client showcase](https://telesrv.net/#flutter) · [Discuss client and IM customization](https://t.me/telesrv_net)
+
+<details>
+<summary>Telegram Desktop and Android compatibility screenshots</summary>
+
 <p align="center">
   <img src="docs/assets/gramsrv-telegram-desktop.png" width="68%" alt="gramsrv running with Telegram Desktop">
   <img src="docs/assets/gramsrv-android.png" width="23%" alt="gramsrv running on Android">
 </p>
+
+</details>
 
 ## Quick start with Docker
 

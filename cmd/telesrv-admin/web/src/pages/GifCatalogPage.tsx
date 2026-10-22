@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { api, errorMessage } from "../api";
 import { ActionButton } from "../components/ActionButton";
-import { SectionTabs, mediaTabs } from "../components/SectionTabs";
+import { SectionTabs } from "../components/SectionTabs";
 import { Alert, Badge, EmptyRow, Metric, PageFrame } from "../components/ui";
 import { useI18n } from "../i18n";
 import type { Navigate } from "../routing";
@@ -40,7 +40,7 @@ export function GifCatalogPage({ navigate }: { navigate: Navigate }) {
   return (
     <PageFrame title={t("gifCatalog.title")} eyebrow={t("gifCatalog.eyebrow")}
       actions={<><button className="btn" type="button" disabled={busy} onClick={() => void load()}><RefreshCw size={15} />{t("common.refresh")}</button><button className="btn primary" type="button" onClick={() => setCreateOpen(true)}><Plus size={15} />{t("gifCatalog.add")}</button></>}>
-      <SectionTabs tabs={mediaTabs} active="/gif-catalog" navigate={navigate} />
+      <SectionTabs sectionId="media" active="/gif-catalog" navigate={navigate} />
       {error && <Alert>{error}</Alert>}
       <div className="metric-row"><Metric label={t("gifCatalog.entries")} value={`${rows.length} / 50`} /><Metric label={t("common.enabled")} value={String(enabled)} tone="good" /></div>
       <div className="toolbar"><label>{t("gifCatalog.filterCategory")} <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}><option value="">{t("gifCatalog.allCategories")}</option>{gifCategories.map((category) => <option key={category} value={category}>{t(`gifCatalog.category.${category}`)}</option>)}</select></label></div>
@@ -48,7 +48,7 @@ export function GifCatalogPage({ navigate }: { navigate: Navigate }) {
         <table className="data-table"><thead><tr><th>{t("common.preview")}</th><th>{t("common.title")}</th><th>{t("gifCatalog.category")}</th><th>{t("common.document")}</th><th>{t("common.source")}</th><th>{t("common.status")}</th><th>{t("common.order")}</th><th>{t("common.actions")}</th></tr></thead>
           <tbody>{visibleRows.map((row) => <tr key={row.ID} className={row.Enabled ? "" : "gift-row-disabled"}>
             <td><GifPreview documentID={row.DocumentID} /></td><td>{row.Title}</td>
-            <td><div>{t(`gifCatalog.category.${row.Category || "other"}`)} · {row.CategoryManual ? t("gifCatalog.manual") : t("gifCatalog.auto")}</div><div className="sort-order-editor"><select value={categoryDrafts[row.ID] ?? (row.CategoryManual ? row.Category : "")} onChange={(event) => setCategoryDrafts((prev) => ({ ...prev, [row.ID]: event.target.value }))}><option value="">{t("gifCatalog.auto")}</option>{gifCategories.map((category) => <option key={category} value={category}>{t(`gifCatalog.category.${category}`)}</option>)}</select><ActionButton compact tone="neutral" label={t("common.save")} path="/api/actions/set-gif-catalog-category" payload={() => ({ id: row.ID, category: categoryDrafts[row.ID] ?? (row.CategoryManual ? row.Category : "") })} onDone={() => void load()} /></div></td>
+            <td><div>{t(`gifCatalog.category.${row.Category || "other"}`)} · {row.CategoryManual ? t("gifCatalog.manual") : t("gifCatalog.auto")}</div><div className="sort-order-editor"><select value={categoryDrafts[row.ID] ?? (row.CategoryManual ? row.Category : "")} onChange={(event) => setCategoryDrafts((prev) => ({ ...prev, [row.ID]: event.target.value }))}><option value="">{t("gifCatalog.auto")}</option>{gifCategories.map((category) => <option key={category} value={category}>{t(`gifCatalog.category.${category}`)}</option>)}</select><ActionButton compact tone="neutral" label={t("common.save")} path="/api/actions/set-gif-catalog-category" payload={() => ({ id: row.ID, category: categoryDrafts[row.ID] ?? (row.CategoryManual ? row.Category : "") })} disabled={categoryDrafts[row.ID] === undefined || categoryDrafts[row.ID] === (row.CategoryManual ? row.Category : "")} onDone={() => void load()} /></div></td>
             <td className="mono">{row.DocumentID}</td><td>{row.SourceFilename || row.FileName || t("gifCatalog.adminUpload")}</td>
             <td>{row.Enabled ? <Badge tone="good">{t("common.enabled")}</Badge> : <Badge tone="danger">{t("common.disabled")}</Badge>}</td>
             <td><div className="sort-order-editor"><input className="small-input" type="number" value={orderDrafts[row.ID] ?? String(row.SortOrder)} onChange={(event) => setOrderDrafts((prev) => ({ ...prev, [row.ID]: event.target.value }))} />

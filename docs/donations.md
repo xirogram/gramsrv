@@ -23,21 +23,36 @@ the two decoupled avoids ever having to think about that again.
 ## Custody
 
 Full custodial: the server holds the mnemonic, encrypted at rest with
-AES-256-GCM. **Works out of the box, no manual setup step:**
+AES-256-GCM.
+
+**Off by default**, via `TELESRV_DONATIONS_ENABLED` (default `false`). This is
+the important operational note in this document: enabling the feature means
+generating a real custodial wallet and polling third-party chain endpoints, so
+neither should happen to a deployment that did not ask for it. With the switch
+off, no wallet is provisioned, no key file is written, and no chain is
+contacted; the admin Donations page still lists the chain registry read-only so
+you can see what turning it on would involve.
+
+Once enabled, there is no further manual step:
 
 - The encryption key is a local file, `data/donation_wallet.key` by default
   (`TELESRV_DONATION_WALLET_KEY_PATH`), generated automatically the first
-  time the server ever runs -- the exact same pattern
+  time the server runs with donations enabled -- the exact same pattern
   `internal/mtprotoedge.LoadOrGenerateRSAKey` already uses for the server's
   MTProto RSA key. An operator who wants to supply their own key instead
   (e.g. from a secrets manager) can set `TELESRV_DONATION_WALLET_KEY` to a
   literal 64-hex-char value, which overrides the file entirely.
 - The wallet mnemonic itself is generated automatically the first time
-  `cmd/telesrv` starts against a database with no wallet row yet
-  (`donationsService.EnsureWallet`, called right after construction iff
-  `!Ready()`). The recovery phrase is never printed or logged -- it only
-  ever exists encrypted in the database -- and every later restart loads
-  the already-encrypted wallet instead.
+  `cmd/telesrv` starts with donations enabled against a database with no
+  wallet row yet (`donationsService.EnsureWallet`, called iff `!Ready()`).
+  The recovery phrase is never printed or logged -- it only ever exists
+  encrypted in the database -- and every later restart loads the
+  already-encrypted wallet instead.
+
+Enabling the switch does **not** enable any chain. Each chain is turned on in
+the admin panel after its RPC endpoint is filled in, and a watcher only starts
+for a row that is both enabled and has a URL; an enabled row with no endpoint
+logs one warning per boot and is skipped rather than dialled.
 
 Losing the key file is exactly like losing a hardware wallet's seed phrase
 -- there is no recovery path, because the encrypted mnemonic in the
@@ -55,11 +70,21 @@ below).
 ## Chains
 
 `donation_chains` is a normal table, seeded by migration
-`20260924140000_donations` with six rows. Only **Ganache** (local dev,
-`http://127.0.0.1:7545`) and **Sepolia** (testnet) ship `enabled = true`.
-Ethereum mainnet, Base, Polygon and BNB Smart Chain ship as disabled
-placeholder rows (empty `rpc_url`) -- an operator fills in the RPC endpoint
-and flips `enabled` once ready, no migration or deploy needed.
+`20260924140000_donations` with six rows: **Ganache** (local dev,
+`http://127.0.0.1:7545`), **Sepolia** (testnet), Ethereum mainnet, Base,
+Polygon and BNB Smart Chain.
+
+**No chain ships enabled.** The seed migration enabled Ganache and Sepolia,
+which was wrong in practice: Sepolia had no endpoint filled in at all, and
+Ganache pointed at a port that exists only on a developer's laptop, so every
+boot of every real deployment dialled `127.0.0.1:7545` and logged an ERROR.
+Migration `20261017010000_donation_chains_off_by_default` clears both -- and
+only rows still carrying the seeded placeholder endpoint, so a deployment that
+had already configured a real endpoint is not switched off by the migration.
+
+An operator fills in an RPC endpoint and flips `enabled` in the admin panel
+once ready; no migration or deploy needed. A watcher starts only for a row
+that is enabled *and* has a URL (`domain.DonationChain.Watchable`).
 
 `donation_tokens` holds the USDT/USDC contract per chain. Sepolia's USDC
 row points at Circle's own canonical testnet deployment

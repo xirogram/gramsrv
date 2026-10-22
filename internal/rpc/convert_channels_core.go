@@ -159,6 +159,11 @@ func tgChannelMessage(viewerUserID int64, m domain.ChannelMessage) tg.MessageCla
 	if m.PaidMessageStars > 0 {
 		msg.SetPaidMessageStars(m.PaidMessageStars)
 	}
+	// Layer 231 事实核查标签随消息下发；need_check 置位时只带 hash，
+	// 客户端滚动到该消息时用 messages.getFactCheck 懒加载结论文本。
+	if factCheck := tgFactCheck(m.FactCheck); factCheck != nil {
+		msg.SetFactcheck(*factCheck)
+	}
 	if m.Pinned {
 		msg.SetPinned(true)
 	}
@@ -547,6 +552,12 @@ func tgChannel(viewerUserID int64, ch domain.Channel, self *domain.ChannelMember
 
 func tgChannelFull(view domain.ChannelView, publicBaseURL ...string) *tg.ChannelFull {
 	ch := view.Channel
+	about := ch.About
+	// Editors receive the stored text used by the client description editor.
+	// Other viewers receive the warning without changing any write boundary.
+	if !channelMemberCanChangeInfo(view.Self) {
+		about = domain.ModerationProfileWarning(ch.Scam, ch.Fake, about)
+	}
 	full := &tg.ChannelFull{
 		// 广播频道的订阅者列表仅管理员可见（官方语义）：非管理员订阅者拿到
 		// can_view_participants=false，Profile 的 Subscribers/Administrators/Channel Settings
@@ -562,8 +573,12 @@ func tgChannelFull(view domain.ChannelView, publicBaseURL ...string) *tg.Channel
 		CanViewStats: !ch.Monoforum && channelMemberIsAdmin(view.Self),
 		ID:           ch.ID,
 		// Official clients render localized warnings from scam/fake flags.
-		// About remains the owner's unmodified description.
-		About:           ch.About,
+		// On top of that badge the server prepends its own warning line to
+		// About (operator-configured via TELESRV_SCAM_WARNING /
+		// TELESRV_FAKE_WARNING), because the badge alone is easy to miss. The
+		// stored description is never rewritten: the warning exists only in
+		// this projection (domain.ModerationProfileWarning).
+		About:           about,
 		ReadInboxMaxID:  view.Dialog.ReadInboxMaxID,
 		ReadOutboxMaxID: view.Dialog.ReadOutboxMaxID,
 		UnreadCount:     view.Dialog.UnreadCount,

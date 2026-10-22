@@ -109,14 +109,7 @@ export function BotVerificationPage({ navigate }: { navigate: Navigate }) {
         ) : undefined
       }
     >
-      <SectionTabs
-        tabs={[
-          ...(canSeeOfficial ? [{ path: "/verification", labelKey: "verification.tabOfficial" }] : []),
-          { path: "/bot-verification", labelKey: "verification.tabThirdParty" }
-        ]}
-        active="/bot-verification"
-        navigate={navigate}
-      />
+      <SectionTabs sectionId="verification" active="/bot-verification" navigate={navigate} />
       {error && <Alert>{error}</Alert>}
       {rosterDenied && <Alert>{t("botverification.rosterDenied")}</Alert>}
       {/* The one thing an operator has to understand before touching anything here:

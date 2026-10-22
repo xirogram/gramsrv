@@ -142,6 +142,10 @@ export type ItemPrice = {
 export type ItemPricesResponse = {
   rows: ItemPrice[];
   stars_rate: number;
+  // The stars_N package sizes the bot offers. Their price is the package size
+  // itself and they credit size * stars_rate server Stars, so they are not
+  // per-product rows and are listed read-only rather than editable.
+  star_packages?: number[];
 };
 
 export type DonationDepositStatus = "pending" | "confirmed" | "credited" | "orphaned";

@@ -156,6 +156,22 @@
   gap: 8px;
 }
 
+/* A label longer than the fixed 92px column wraps to one word per line, which is
+   unreadable -- "Server Stars per 1 Telegram Star" became a four-line stack on a
+   phone. The column also holds short labels the console uses everywhere, so it
+   widens to fit a full label where there is room and collapses to a single
+   column on narrow screens rather than breaking the words up. */
+.result-line {
+  grid-template-columns: minmax(92px, max-content) minmax(0, 1fr);
+}
+
+@media (max-width: 760px) {
+  .result-line {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+}
+
 .result-line span {
   color: var(--muted);
 }

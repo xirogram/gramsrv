@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"telesrv/internal/config"
+	"telesrv/internal/domain"
 	"telesrv/internal/hoststats"
 )
 
@@ -133,6 +134,9 @@ func loadConfig() (uiConfig, error) {
 	if err != nil {
 		return uiConfig{}, fmt.Errorf("load config: %w", err)
 	}
+	// 管理面板也能按手机号建号，必须与 telesrv 主进程使用同一套格式策略，
+	// 否则面板写入的号码主进程会当成非法号。
+	domain.ConfigurePhoneFormatCheck(appCfg.CheckNumberFormat)
 
 	adminAPIAddr := appCfg.AdminAPIAddr
 	if strings.TrimSpace(adminAPIAddr) == "" {

@@ -90,14 +90,7 @@ export function VerificationPage({ navigate }: { navigate: Navigate }) {
         </button>
       }
     >
-      <SectionTabs
-        tabs={[
-          { path: "/verification", labelKey: "verification.tabOfficial" },
-          ...(canSeeThirdParty ? [{ path: "/bot-verification", labelKey: "verification.tabThirdParty" }] : [])
-        ]}
-        active="/verification"
-        navigate={navigate}
-      />
+      <SectionTabs sectionId="verification" active="/verification" navigate={navigate} />
       {error && <Alert>{error}</Alert>}
       <div className="metric-row">
         {statuses.map((item) => (

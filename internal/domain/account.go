@@ -3,11 +3,42 @@ package domain
 import (
 	"errors"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode"
 
 	"github.com/nyaruka/phonenumbers"
 )
+
+const (
+	// MinLoginPhoneDigits is the shortest accepted login identity in the
+	// lenient format policy. It keeps short international numbers such as
+	// "+7 123" usable while staying above the empty and single-digit range.
+	MinLoginPhoneDigits = 4
+	// MaxLoginPhoneDigits bounds a login identity. It matches the users.phone
+	// column width and stays inside E.164's 15-digit ceiling for every
+	// number the numbering plan can canonicalize.
+	MaxLoginPhoneDigits = 32
+)
+
+// phoneFormatCheck selects the strict phone-number format policy. The default
+// is the lenient policy; ConfigurePhoneFormatCheck installs the deployment's
+// choice before any store or RPC service is constructed.
+var phoneFormatCheck atomic.Bool
+
+// ConfigurePhoneFormatCheck installs the deployment's phone-number format
+// policy. Strict mode requires the number to sit in an assigned range of a
+// real country calling code; the default lenient mode also accepts nonzero-leading
+// digit identities outside the numbering plan, with or without a leading '+'.
+func ConfigurePhoneFormatCheck(strict bool) {
+	phoneFormatCheck.Store(strict)
+}
+
+// PhoneFormatCheckEnabled reports whether the strict phone-number format
+// policy is installed.
+func PhoneFormatCheckEnabled() bool {
+	return phoneFormatCheck.Load()
+}
 
 var (
 	ErrPasswordHashInvalid     = errors.New("password hash invalid")
@@ -298,10 +329,21 @@ func PhoneDigits(phone string) string {
 // prefix. For example, both +98 0998 167 9461 and +98 998 167 9461 become
 // 989981679461, while Italy's significant leading zero in +39 02 ... is retained.
 //
-// IsPossibleNumber is the structural gate rather than IsValidNumber. It keeps
-// syntactically possible reserved/test ranges usable without accepting local
-// numbers that omit their country calling code or numbers outside E.164's
-// length/plan metadata.
+// Two format policies exist:
+//
+//   - The default (lenient) policy keeps IsPossibleNumber as the structural
+//     gate: a country calling code plus a length that matches that country's
+//     numbering plan is enough. A number the plan cannot describe is still
+//     accepted when it is short enough and carries no national trunk prefix,
+//     so ranges such as "+7 123" or "+1488" remain usable login identities.
+//     The digits are then stored verbatim.
+//   - The strict policy (ConfigurePhoneFormatCheck) additionally requires
+//     IsValidNumber, i.e. the number must sit in an assigned range of a real
+//     country calling code. Short and unassigned ranges are rejected.
+//
+// Neither policy accepts a national number that omits its country calling
+// code: "09981679461" and "00989981679461" carry a leading trunk zero and
+// are refused in both modes.
 func NormalizePhone(phone string) string {
 	digits := PhoneDigits(phone)
 	if digits == "" {
@@ -334,14 +376,51 @@ func NormalizePhone(phone string) string {
 		return normalised
 	}
 	number, err := phonenumbers.Parse("+"+digits, phonenumbers.UNKNOWN_REGION)
-	if err != nil || !phonenumbers.IsPossibleNumber(number) {
+	if err == nil {
+		if phoneFormatCheck.Load() {
+			if !phonenumbers.IsValidNumber(number) {
+				return ""
+			}
+			canonical := strings.TrimPrefix(phonenumbers.Format(number, phonenumbers.E164), "+")
+			if canonical == "" || len(canonical) > MaxLoginPhoneDigits {
+				return ""
+			}
+			return canonical
+		}
+		if phonenumbers.IsPossibleNumber(number) {
+			canonical := strings.TrimPrefix(phonenumbers.Format(number, phonenumbers.E164), "+")
+			if canonical == "" || len(canonical) > MaxLoginPhoneDigits {
+				return ""
+			}
+			return canonical
+		}
+		// The numbering plan cannot describe these digits. The lenient policy
+		// still keeps an explicitly international number usable.
+	} else if phoneFormatCheck.Load() {
 		return ""
 	}
-	canonical := strings.TrimPrefix(phonenumbers.Format(number, phonenumbers.E164), "+")
-	if canonical == "" || len(canonical) > 15 {
+	// The lenient policy accepts a number the plan cannot describe. The digits
+	// are stored verbatim, so the identity stays exactly what the caller
+	// typed and stays canonical on the next normalization pass.
+	if phoneFormatCheck.Load() {
 		return ""
 	}
-	return canonical
+	if len(digits) < MinLoginPhoneDigits || len(digits) > MaxLoginPhoneDigits {
+		return ""
+	}
+	// A leading zero marks the national/trunk form of a number whose country
+	// calling code was omitted ("07400123456", "00989981679461"). Such a
+	// value is ambiguous between a national number and a calling code, so it
+	// never becomes a login identity.
+	if strings.HasPrefix(digits, "0") {
+		return ""
+	}
+	// The +888 space has its own identity rule above: a number outside the
+	// 7-15 digit collectible range is not a login identity at all.
+	if strings.HasPrefix(digits, "888") {
+		return ""
+	}
+	return digits
 }
 
 // ValidPhone reports whether phone is already in the persisted canonical form.

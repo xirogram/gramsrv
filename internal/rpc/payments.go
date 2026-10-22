@@ -22,6 +22,12 @@ func (r *Router) registerPayments(d *tlprofile.Dispatcher) {
 	registerRPC[*tg.PaymentsCanPurchaseStoreRequest](d, tlprofile.SemanticMethodPaymentsCanPurchaseStore, func(ctx context.Context, req *tg.PaymentsCanPurchaseStoreRequest) (any, error) {
 		return r.onPaymentsCanPurchaseStore(ctx, req)
 	})
+	// Keep the fixed local-ledger reference rate consistent with app config.
+	registerRPC[*tg.PaymentsGetCurrencyRatesRequest](d, tlprofile.SemanticMethodPaymentsGetCurrencyRates, func(ctx context.Context, _ *tg.PaymentsGetCurrencyRatesRequest) (any, error) {
+		return &tg.PaymentsCurrencyRates{Rates: []tg.CurrencyRate{
+			{Currency: "USD", Rate: domain.TonUSDRate},
+		}}, nil
+	})
 	registerRPC[*tg.PaymentsAssignPlayMarketTransactionRequest](d, tlprofile.SemanticMethodPaymentsAssignPlayMarketTransaction, func(ctx context.Context, req *tg.PaymentsAssignPlayMarketTransactionRequest) (any, error) {
 		return r.onPaymentsAssignPlayMarketTransaction(ctx, req)
 	})

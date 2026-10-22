@@ -8,10 +8,35 @@
 
 [English README](README.md) · [官网](https://telesrv.net) · [OwpenGram 客户端](https://owpengram.org/) · [讨论群](https://t.me/telesrv_chat) · [频道](https://t.me/telesrv)
 
+## telesrv-flutter：我们自己的客户端
+
+**从服务端，到我们自己的客户端。**
+
+我们正在用 Flutter 重新实现客户端。会话列表、聊天界面、消息与媒体、群资料面板，
+已经落到实际运行的产品中。
+
+![telesrv-flutter Windows 实际运行界面：文件夹导航、会话列表、聊天区域和群资料面板](docs/assets/telesrv-flutter-windows.webp)
+
+Windows 实际运行界面。**telesrv-flutter 暂未开放下载。**
+
+- **自己的会话组织：**文件夹导航、归档、未读标记与会话搜索。
+- **自己的聊天体验：**消息气泡、引用回复、置顶消息与媒体展示。
+- **自己的桌面工作区：**会话、消息与群资料并排呈现，大屏布局、主题与窗口体验可以持续演进。
+
+Flutter 构建产品界面与交互，自有 TDLib fork 承接协议与本地状态，telesrv 提供服务端能力。
+我们有能力从头构建客户端，也有能力与服务端一起演进，围绕业务场景定制整套 IM 产品。
+
+[查看客户端介绍](https://telesrv.net/#flutter) · [咨询客户端与 IM 定制](https://t.me/telesrv_net)
+
+<details>
+<summary>Telegram Desktop 与 Android 兼容客户端截图</summary>
+
 <p align="center">
   <img src="docs/assets/gramsrv-telegram-desktop.png" width="68%" alt="Telegram Desktop 正在连接 gramsrv">
   <img src="docs/assets/gramsrv-android.png" width="23%" alt="Android 客户端正在连接 gramsrv">
 </p>
+
+</details>
 
 ## Docker 一键体验
 

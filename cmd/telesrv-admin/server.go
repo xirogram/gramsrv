@@ -55,6 +55,17 @@ func newServer(cfg uiConfig, read *readStore, hostStats *hoststats.Poller) (*ser
 
 func (s *server) routes() http.Handler {
 	mux := http.NewServeMux()
+	// The login page renders before any session exists, and it is the first
+	// thing an operator sees -- it showed the bundled reference logo while the
+	// sidebar, one click later, showed their own uploaded icon. This is the one
+	// deliberately unauthenticated route in the panel.
+	//
+	// What it exposes is a brand mark and nothing else: no name, no
+	// description, no status, no counts. It is the same picture the login form
+	// is already asking the browser to render, so serving it publicly discloses
+	// nothing that was not on screen. It answers 404 when no icon is
+	// configured and the client falls back to the static /logo.png.
+	mux.HandleFunc("GET /api/public/icon", s.handlePublicServerIconAPI)
 	mux.HandleFunc("POST /api/login", s.handleAPILogin)
 	// Logout goes through the same gate as every other mutating route: a forced
 	// logout is a state change, and an invalid session is cleared by the gate

@@ -642,6 +642,7 @@ func TestChannelUsernameAndManagementRPC(t *testing.T) {
 	userService := appusers.NewService(userStore)
 	channelService := appchannels.NewService(channelStore)
 	r := New(Config{}, Deps{
+		Account:  newForumNotifyTestAccount(),
 		Users:    userService,
 		Channels: channelService,
 		Moderation: appmoderation.NewService(

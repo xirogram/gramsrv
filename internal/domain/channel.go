@@ -725,6 +725,8 @@ type ChannelMessage struct {
 	Media       *MessageMedia
 	// RichMessage 是 Layer 228 富文本消息（richMessage）快照，可选；普通消息恒 nil。
 	RichMessage *MessageRichMessage
+	// FactCheck 是 Layer 231 事实核查标签快照，可选；无标签的消息恒 nil。
+	FactCheck *FactCheck
 	// FromBoostsApplied 是发送时的 sender boost 数快照（message.from_boosts_applied）。
 	FromBoostsApplied int
 	TTLPeriod         int

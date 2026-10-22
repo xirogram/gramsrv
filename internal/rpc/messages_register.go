@@ -581,6 +581,15 @@ func (r *Router) registerMessages(d *tlprofile.Dispatcher) {
 	registerRPC[*tg.MessagesEditMessageRequest](d, tlprofile.SemanticMethodMessagesEditMessage, func(ctx context.Context, layerRequest *tg.MessagesEditMessageRequest) (any, error) {
 		return r.onMessagesEditMessage(ctx, layerRequest)
 	})
+	registerRPC[*tg.MessagesEditFactCheckRequest](d, tlprofile.SemanticMethodMessagesEditFactCheck, func(ctx context.Context, layerRequest *tg.MessagesEditFactCheckRequest) (any, error) {
+		return r.onMessagesEditFactCheck(ctx, layerRequest)
+	})
+	registerRPC[*tg.MessagesDeleteFactCheckRequest](d, tlprofile.SemanticMethodMessagesDeleteFactCheck, func(ctx context.Context, layerRequest *tg.MessagesDeleteFactCheckRequest) (any, error) {
+		return r.onMessagesDeleteFactCheck(ctx, layerRequest)
+	})
+	registerRPC[*tg.MessagesGetFactCheckRequest](d, tlprofile.SemanticMethodMessagesGetFactCheck, func(ctx context.Context, layerRequest *tg.MessagesGetFactCheckRequest) (any, error) {
+		return r.onMessagesGetFactCheck(ctx, layerRequest)
+	})
 	registerRPC[*tg.MessagesGetOutboxReadDateRequest](d, tlprofile.SemanticMethodMessagesGetOutboxReadDate, func(ctx context.Context, layerRequest *tg.MessagesGetOutboxReadDateRequest) (any, error) {
 		return r.onMessagesGetOutboxReadDate(ctx, layerRequest)
 	})

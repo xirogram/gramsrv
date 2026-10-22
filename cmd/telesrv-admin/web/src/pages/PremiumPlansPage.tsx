@@ -8,6 +8,7 @@ import {
   RefreshCw,
   Save,
   Settings2,
+  Users,
   X
 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
@@ -15,7 +16,7 @@ import { createPortal } from "react-dom";
 import { api, errorMessage } from "../api";
 import { ActionButton } from "../components/ActionButton";
 import { UserPicker } from "../components/EntityPicker";
-import { SectionTabs, grantsTabs } from "../components/SectionTabs";
+import { SectionTabs } from "../components/SectionTabs";
 import { Alert, Badge, EmptyRow, PageFrame, SectionHead } from "../components/ui";
 import { useI18n } from "../i18n";
 import type { Navigate } from "../routing";
@@ -59,11 +60,14 @@ export function PremiumPlansPage({ navigate }: { navigate: Navigate }) {
   const [selectedUser, setSelectedUser] = useState<AccountRow | null>(null);
   const [starsAmount, setStarsAmount] = useState("1000");
   const [premiumMonths, setPremiumMonths] = useState("1");
+  const [massAmount, setMassAmount] = useState("100");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   const parsedStars = Number(starsAmount);
   const parsedMonths = Number(premiumMonths);
+  const parsedMassAmount = Number(massAmount);
+  const canMassGrant = Number.isSafeInteger(parsedMassAmount) && parsedMassAmount > 0;
   const selectedUserID = selectedUser?.ID ?? 0;
   const enabledPlans = plans.filter((plan) => plan.Enabled).length;
 
@@ -183,7 +187,7 @@ export function PremiumPlansPage({ navigate }: { navigate: Navigate }) {
         <RefreshCw size={15} /> {t("common.refresh")}
       </button>
     }>
-      <SectionTabs tabs={grantsTabs} active="/monetization" navigate={navigate} />
+      <SectionTabs sectionId="commerce" active="/monetization" navigate={navigate} />
       <section className="surface premium-operations-compact">
         <SectionHead title={t("premium.operations")} text={t("premium.operationsHint")} />
         <div className="premium-operation-bar">
@@ -286,6 +290,29 @@ export function PremiumPlansPage({ navigate }: { navigate: Navigate }) {
           ))}
           {!loading && plans.length === 0 && <table><tbody><EmptyRow colSpan={1} /></tbody></table>}
           {loading && <div className="loading-line">{t("common.loading")}</div>}
+        </div>
+      </section>
+
+      {/* The giveaway used to be a tab of its own. It is a bulk write on every
+          real account, so it sits last, behind its own warned frame, and it
+          runs through the same reason -> dry run -> confirm flow as every
+          other write in the console. */}
+      <section className="surface premium-mass-surface">
+        <div className="premium-mass-head">
+          <span><Users size={14} /></span>
+          <div>
+            <strong>{t("premium.massGrantTitle")}</strong>
+            <p>{t("premium.massGrantHint")}</p>
+          </div>
+        </div>
+        <div className="premium-mass-row">
+          <input aria-label={t("premium.starsAmount")} type="number" min={1} value={massAmount}
+            onChange={(event) => setMassAmount(event.target.value)} />
+          <ActionButton compact tone="warn" icon={<Users size={14} />} label={t("premium.grantStarsAll")}
+            path="/api/actions/grant-stars-all"
+            disabled={!canMassGrant}
+            payload={() => ({ amount: parsedMassAmount })} />
+          <p className="premium-store-hint">{t("premium.grantStarsAllHint")}</p>
         </div>
       </section>
 

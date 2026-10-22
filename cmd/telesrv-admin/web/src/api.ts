@@ -303,9 +303,17 @@ export const api = {
   serverEnv: () => request<EnvGroup[]>("/api/server/env"),
   serverStatus: () => request<ServerStatus>("/api/server/status"),
   serverIconURL: (bust = 0) => `/api/server/icon?_=${bust}`,
+  // The login screen renders before a session exists, so it cannot read the
+  // server.manage-gated icon route. This one is public and serves the same
+  // bytes; the page falls back to /logo.png on a 404 (no icon configured).
+  publicServerIconURL: (bust = 0) => `/api/public/icon?_=${bust}`,
   uploadServerIcon: (form: FormData) => request<CommandResult>("/api/actions/upload-server-icon", { method: "POST", body: form }),
-  action: (path: string, payload: Record<string, unknown>) => request<CommandResult>(path, {
+  // action posts an audited command. A FormData body is sent as multipart -- the
+// browser sets the boundary and request() leaves Content-Type alone for it --
+// which is how the archive and directory uploads post a file alongside the
+// reason and command id.
+action: (path: string, payload: Record<string, unknown> | FormData) => request<CommandResult>(path, {
     method: "POST",
-    body: JSON.stringify(payload)
+    body: payload instanceof FormData ? payload : JSON.stringify(payload)
   })
 };

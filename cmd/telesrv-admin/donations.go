@@ -8,9 +8,13 @@ import (
 )
 
 // handleDonationWalletStatusAPI reports whether a crypto donations wallet
-// exists and how many deposit addresses have been assigned. The wallet is
-// auto-provisioned at server startup if missing (see docs/donations.md) --
-// there is deliberately no admin action to create or regenerate one here.
+// exists and how many deposit addresses have been assigned.
+//
+// "Not provisioned" is the normal answer: the wallet is only generated when
+// TELESRV_DONATIONS_ENABLED is set on the server, and there is deliberately no
+// admin action to create or regenerate one from here (see docs/donations.md).
+// Turning the feature on is a .env change and a restart, not something this
+// page can do on the operator's behalf.
 func (s *server) handleDonationWalletStatusAPI(w http.ResponseWriter, r *http.Request) {
 	if s.read == nil {
 		writeAPIError(w, http.StatusServiceUnavailable, "read store is not configured")

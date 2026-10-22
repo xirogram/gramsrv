@@ -346,10 +346,10 @@ func notifyScopeColumns(scope domain.NotifyScope) (kind, peerType string, peerID
 	return kind, "", 0, 0
 }
 
-func scanNotifySettings(row pgx.Row) (domain.PeerNotifySettings, error) {
+func scanNotifySettings(row pgx.Row, prefix ...any) (domain.PeerNotifySettings, error) {
 	var showPreviews, silent, storiesMuted, storiesHideSender sql.NullBool
 	var muteUntil sql.NullInt32
-	if err := row.Scan(&showPreviews, &silent, &muteUntil, &storiesMuted, &storiesHideSender); err != nil {
+	if err := row.Scan(append(prefix, &showPreviews, &silent, &muteUntil, &storiesMuted, &storiesHideSender)...); err != nil {
 		return domain.PeerNotifySettings{}, err
 	}
 	out := domain.PeerNotifySettings{}
@@ -368,6 +368,33 @@ func scanNotifySettings(row pgx.Row) (domain.PeerNotifySettings, error) {
 	}
 	if storiesHideSender.Valid {
 		out.StoriesHideSender = &storiesHideSender.Bool
+	}
+	return out, nil
+}
+
+func (s *PasswordStore) GetForumTopicNotifySettings(ctx context.Context, ownerUserID int64, peer domain.Peer, topicIDs []int) (map[int]domain.PeerNotifySettings, error) {
+	out := make(map[int]domain.PeerNotifySettings, len(topicIDs))
+	if len(topicIDs) == 0 {
+		return out, nil
+	}
+	rows, err := s.db.Query(ctx, `SELECT topic_id, show_previews, silent, mute_until, stories_muted, stories_hide_sender
+FROM notify_settings
+WHERE owner_user_id = $1 AND scope_kind = 'peer' AND peer_type = $2 AND peer_id = $3 AND topic_id = ANY($4::int[])`,
+		ownerUserID, string(peer.Type), peer.ID, topicIDs)
+	if err != nil {
+		return nil, fmt.Errorf("batch get forum notification settings: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int
+		settings, err := scanNotifySettings(rows, &id)
+		if err != nil {
+			return nil, fmt.Errorf("scan forum notification settings: %w", err)
+		}
+		out[id] = settings
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate forum notification settings: %w", err)
 	}
 	return out, nil
 }

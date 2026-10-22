@@ -473,12 +473,9 @@ WHERE collectible_revision_id=$1 AND crafted
 				return fmt.Errorf("allocate unique star gift id: %w", err)
 			}
 			var title string
-			if err := tx.QueryRow(ctx, `SELECT title FROM star_gift_catalog_revisions WHERE id=$1`, locked.RevisionID).Scan(&title); err != nil {
-				return fmt.Errorf("load upgrade gift title: %w", err)
-			}
 			var releasedByType string
 			var releasedByID int64
-			if err := tx.QueryRow(ctx, `SELECT COALESCE(released_by_peer_type,''), COALESCE(released_by_peer_id,0) FROM star_gift_catalog_revisions WHERE id=$1`, locked.RevisionID).Scan(&releasedByType, &releasedByID); err != nil {
+			if err := tx.QueryRow(ctx, `SELECT title, COALESCE(released_by_peer_type,''), COALESCE(released_by_peer_id,0) FROM star_gift_catalog_revisions WHERE id=$1`, locked.RevisionID).Scan(&title, &releasedByType, &releasedByID); err != nil {
 				return fmt.Errorf("load upgrade gift released by: %w", err)
 			}
 			slug := fmt.Sprintf("%s-%d", revision.SlugPrefix, num)

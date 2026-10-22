@@ -160,6 +160,7 @@ const permissionLabels: Record<string, { title: string; hint: string }> = {
   "storage.manage": { title: "Purge storage", hint: "Manually delete stored media" },
   "dashboard.read": { title: "View the dashboard", hint: "See the overview counters and server health" },
   "premium.manage": { title: "Manage Premium", hint: "Grant, revoke and refund Premium" },
+  "donations.manage": { title: "Manage crypto donations", hint: "Watch the deposit wallet, configure chains and read the deposit ledger" },
   "prices.manage": { title: "Manage shop prices", hint: "Edit product prices, hide products and set the Stars rate" },
   "verification.review": { title: "Verify accounts", hint: "Work the verification queue and grant badges" },
   "verification.revoke": { title: "Remove verification", hint: "Take a granted badge away (needs the right above too)" },
@@ -223,8 +224,8 @@ export const permissionGroups: { title: string; hint: string; permissions: strin
   },
   {
     title: "Billing",
-    hint: "Premium grants, refunds, the Stars ledger and shop pricing",
-    permissions: ["premium.manage", "stars.read", "prices.manage"]
+    hint: "Premium grants, refunds, the Stars ledger, shop pricing and crypto donations",
+    permissions: ["premium.manage", "stars.read", "prices.manage", "donations.manage"]
   },
   {
     title: "The console itself",

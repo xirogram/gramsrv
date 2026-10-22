@@ -1,23 +1,36 @@
 import { useI18n } from "../i18n";
+import { sectionById, visibleTabs, type NavTab } from "../nav";
+import { usePermissions } from "../permissions";
 import type { Navigate } from "../routing";
 import { AppLink } from "./AppLink";
 
 // SectionTabs renders the in-page sub-menu shared by the consolidated sidebar
-// entries (Grants, Verification, Star Gifts, Media, NFT Items): the sidebar
-// link is flat, and the tabs inside the page switch between the sibling
+// entries (Accounts, Commerce, Verification, Gifts, Media, NFT Items): the
+// sidebar link is flat, and the tabs inside the page switch between the sibling
 // routes. Same visual language as Server Settings' Settings/Services bar.
+//
+// The tab list comes from the nav table, so it is permission-filtered by the
+// same `can` the sidebar used: an operator who holds only prices.manage sees
+// the Prices tab in the Commerce bar and nothing else. A section reduced to one
+// visible tab draws no bar at all rather than a single lonely button.
 export type SectionTab = { path: string; labelKey: string };
 
 export function SectionTabs({
-  tabs,
+  sectionId,
   active,
   navigate
 }: {
-  tabs: SectionTab[];
+  sectionId: string;
   active: string;
   navigate: Navigate;
 }) {
   const { t } = useI18n();
+  const { can } = usePermissions();
+  const section = sectionById(sectionId);
+  if (!section) {
+    return null;
+  }
+  const tabs: NavTab[] = visibleTabs(section, can);
   if (tabs.length < 2) {
     return null;
   }
@@ -28,7 +41,7 @@ export function SectionTabs({
           key={tab.path}
           href={tab.path}
           navigate={navigate}
-          className={`tab-btn ${active === tab.path ? "active" : ""}`}
+          className={`tab-btn ${isActive(tab, active) ? "active" : ""}`}
         >
           {t(tab.labelKey)}
         </AppLink>
@@ -37,25 +50,8 @@ export function SectionTabs({
   );
 }
 
-export const grantsTabs: SectionTab[] = [
-  { path: "/monetization", labelKey: "layout.premium" },
-  { path: "/star-issue", labelKey: "layout.starIssue" },
-  { path: "/give-gifts", labelKey: "layout.giveGifts" }
-];
-
-export const giftTabs: SectionTab[] = [
-  { path: "/gifts", labelKey: "gifts.pageTitle" },
-  { path: "/auctions", labelKey: "layout.auctions" }
-];
-
-export const mediaTabs: SectionTab[] = [
-  { path: "/stickers", labelKey: "layout.stickers" },
-  { path: "/emoji", labelKey: "layout.emoji" },
-  { path: "/gif-catalog", labelKey: "layout.gifCatalog" }
-];
-
-export const nftTabs: SectionTab[] = [
-  { path: "/collectible-usernames", labelKey: "layout.collectibleUsernames" },
-  { path: "/collectible-phones", labelKey: "layout.collectiblePhones" },
-  { path: "/nft-gifts", labelKey: "nft.gifts" }
-];
+// isActive lets a tab claim an alias path, so /messages (which renders the
+// private view) marks the Private tab active instead of lighting none of them.
+function isActive(tab: NavTab, active: string): boolean {
+  return active === tab.path || (tab.aliases ?? []).includes(active);
+}

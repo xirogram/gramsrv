@@ -18,6 +18,17 @@ This document describes every setting loaded by `internal/config`. Defaults and 
 - Invalid integer, float, boolean, or duration text falls back to the code default. URL, app-scheme, app-name, and login-email dependency validation fails startup instead.
 - Never commit real passwords, tokens, private DSNs, or TURN secrets. Prefer a secret manager or protected service environment in production.
 
+At startup, when `<config file>.example` is available, the server reports template keys absent from both the config file and process environment at INFO and file keys absent from the template at WARN. The report contains key names only and never writes configuration files. A missing template skips this advisory comparison.
+
+### Profile moderation warnings
+
+| Setting | Type / code default | Description |
+|---|---|---|
+| `TELESRV_SCAM_WARNING` | string / built-in English fraud warning | Prefix for SCAM peers in readable user/channel About fields and non-member invite previews. Empty or whitespace selects the built-in text. |
+| `TELESRV_FAKE_WARNING` | string / built-in English impersonation warning | Equivalent prefix for FAKE peers. SCAM takes precedence if both flags are present. |
+
+About privacy hides the entire user About projection, including the warning. A user's own view and channel creators/admins with ChangeInfo receive the stored description used by the editor. Warning text is never persisted or stripped from author input; flag badges remain available to clients. Changes require restart.
+
 ## 2. MTProto listener, transport, and resource budgets
 
 | Setting | Type / code default | Description and constraints |
@@ -28,6 +39,7 @@ This document describes every setting loaded by `internal/config`. Defaults and 
 | `TELESRV_DC` | positive TL int32 / `2` | Canonical server DC ID used in server-originated configuration, media/DC metadata, and `channelFull.stats_dc`. It must be within `1..2147483647` or startup fails. It does not partition key-exchange state on the current single backend. |
 | `TELESRV_DEFAULT_COUNTRY_CODE` | ISO alpha-2 / `CN` | Country returned by `help.getNearestDc` for login-page preselection. Clients map `CN` to calling code `+86`, `US` to `+1`, and so on. Input is trimmed, uppercased, and validated as a country or autonomous area; malformed or unknown values fail startup. |
 | `TELESRV_STRICT_DC_CHECK` | bool / `false` | Default `false` accepts every wire int32 DC label for permanent and temporary key exchange. `true` requires permanent `dc_id == TELESRV_DC` and temporary `abs(dc_id) == TELESRV_DC`; it is only a diagnostic and does not provide multi-DC isolation. |
+| `TELESRV_CHECK_NUMBER_FORMAT` | bool / `false` | Login identity format policy. Default `false` canonicalizes numbers described by the country numbering plan and also accepts 4-32 digit nonzero-leading identities outside that plan (including short or unassigned ranges and unknown calling codes). `true` additionally requires ordinary numbers to pass assigned-range validation. Both modes reject leading trunk zeroes, retain the independent 7-15 digit virtual `+888` rule, and forbid login as reserved `+42777`. Use the same setting in server and Admin. Changing to strict mode can make previously accepted identities unavailable for phone-based operations; it does not rewrite stored numbers. |
 | `TELESRV_WEBSOCKET_ENABLE` | bool / `true` | Enables MTProto-over-WebSocket demultiplexing on the MTProto listener. |
 | `TELESRV_WEBSOCKET_ALLOWED_ORIGINS` | list / `http://localhost:1234,http://127.0.0.1:1234` | Browser WebSocket origin allow-list. `*` is for temporary debugging only. |
 | `TELESRV_MTPROTO_MAX_CONNECTIONS` | int / `200000` | Global physical connection admission limit. Negative disables this gate. |
@@ -799,3 +811,25 @@ At minimum, production operators should explicitly review and override the devel
 ## Cross-collection gift crafting
 
 `TELESRV_STAR_GIFT_CROSS_CRAFT_USER_IDS` is an explicit comma-separated positive user-ID allowlist; empty disables AI cross-collection crafting. A configured AI provider and blob backend are required. Ordinary same-collection catalog crafting remains available.
+
+## Optional wallet and donations capabilities
+
+`TELESRV_WALLET_STATE_DIR` defaults to empty (disabled). Set a private POSIX
+0700 directory to enable the partial Layer 230 wallet. In Docker choose
+`/var/lib/telesrv/wallet`; keep `TELESRV_WALLET_KEY_FILE` (default
+`data/wallet/keys.key`, Docker `/var/lib/telesrv/wallet/keys.key`) backed up
+with all account state. Missing files are created 0600, persisted custody keys
+are verified against the configured cipher on startup. No raw legacy key
+encoding is inferred. `TELESRV_WALLET_TONCENTER_API_KEY` is optional and requires
+an enabled state directory. Empty means no external TON provider connection.
+Balances/history come from this server's local nanoton ledger. Chain sending,
+gasless, wallet backup/export and TON Connect sessions remain unimplemented;
+this setting does not make them available.
+
+`TELESRV_DONATIONS_ENABLED=false` disables provisioning of the donations seed
+and all chain watchers. Existing deployments must explicitly set it to true
+and enable/configure the desired chain to continue that feature after upgrade.
+The donations encryption key and wallet master key are distinct secrets.
+The new data-only migration disables chains with empty or seeded placeholder
+RPC endpoints and preserves configured remote endpoints. Turning the master
+flag off does not delete existing wallet/deposit facts.

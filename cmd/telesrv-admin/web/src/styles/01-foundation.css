@@ -245,11 +245,16 @@ a {
   box-shadow: var(--shadow-brand);
 }
 
+/* The brand mark is a rounded square, not a circle. An operator uploads a
+   square image, and clipping it to a circle cut the corners off artwork they
+   designed as a square -- a logo that reads as "a square with empty borders
+   where a circle should be". A squircle shows the uploaded pixels as they were
+   drawn and still reads as an app icon at 30px. */
 .brand-mark {
   display: grid;
   width: 34px;
   height: 34px;
-  border-radius: 50%;
+  border-radius: 30%;
   overflow: hidden;
   place-items: center;
 }
@@ -504,6 +509,45 @@ a {
   display: grid;
   gap: 16px;
   padding: 18px 24px 30px;
+}
+
+/* On a screen with both width and height to spare the shell becomes a
+   viewport-height grid so the content area, rather than the document, is what
+   scrolls. The topbar and the sidebar were already independent of the scroll
+   position -- one sticky, one height-locked -- so pinning the shell changes
+   nothing about them, and it is what lets the overview size itself to the
+   space it has instead of guessing at it.
+
+   The min-height is the honest part: a short laptop window does not have the
+   vertical room for a fixed-height overview, and squeezing it produced panels
+   clipped to a few pixels rather than anything readable. Below that the old
+   document scroll applies and the page simply gets taller, which is what every
+   other page in the panel has always done. */
+@media (min-width: 1181px) and (min-height: 820px) {
+  .shell {
+    height: 100vh;
+  }
+
+  .workspace {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .content {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    /* Stop the one implicit row from absorbing the leftover height. A grid
+       container with a definite height stretches its auto-sized rows by
+       default, and every page in the panel is a single .page-frame -- so each
+       page card was pulled to the full viewport with its own rows smeared out
+       to match, which is the "everything is stretched" look. The overview
+       opts back in with an explicit 1fr row (.content:has(> .overview) in
+       02-pages-and-forms.css); everything else stacks from the top, which is
+       how it behaved before this media query existed. */
+    align-content: start;
+  }
 }
 
 .eyebrow {

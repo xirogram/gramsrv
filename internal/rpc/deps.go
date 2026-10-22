@@ -761,6 +761,10 @@ type ChannelsService interface {
 	JoinChannel(ctx context.Context, userID, channelID int64, date int) (domain.CreateChannelResult, error)
 	LeaveChannel(ctx context.Context, userID, channelID int64, date int) (domain.CreateChannelResult, error)
 	EditTitle(ctx context.Context, userID int64, req domain.EditChannelTitleRequest) (domain.EditChannelTitleResult, error)
+	// EditFactCheck 写入/删除消息的 Layer 231 事实核查标签；空文本表示删除。
+	EditFactCheck(ctx context.Context, userID int64, req domain.EditFactCheckRequest) (domain.EditFactCheckResult, error)
+	// GetFactChecks 批量读取消息的事实核查标签。
+	GetFactChecks(ctx context.Context, userID, channelID int64, messageIDs []int) (domain.FactCheckList, error)
 	SetWallpaper(ctx context.Context, userID int64, req domain.SetChannelWallpaperRequest) (domain.SetChannelWallpaperResult, error)
 	EditAbout(ctx context.Context, userID int64, req domain.EditChannelAboutRequest) (domain.Channel, error)
 	EditAdmin(ctx context.Context, userID int64, req domain.EditChannelAdminRequest) (domain.EditChannelAdminResult, error)
@@ -1215,8 +1219,10 @@ type Deps struct {
 	Stars                        StarsService
 	Giveaways                    StarsGiveawayService
 	Gifts                        GiftsService
-	Passkey                      PasskeyService
-	Themes                       ThemeService
+	// Wallet 是 Layer 230 应用内 TON 钱包；为 nil 时 wallet.* 回 WALLET_UNAVAILABLE。
+	Wallet  WalletService
+	Passkey PasskeyService
+	Themes  ThemeService
 	// GeoIP 把会话记录的 IP 解析为 account.getAuthorizations 展示用的国家/地区
 	// 文案。为 nil(未配置地理后端)时列表继续回传占位文案,与启用前一致。
 	GeoIP geoip.Resolver
@@ -1337,6 +1343,31 @@ type StarsGiveawayService interface {
 
 	// RefundEntry reverses a charged entry whose message was never sent.
 	RefundEntry(ctx context.Context, giveawayID, participantUserID, feeStars int64) error
+}
+
+// WalletService 抽象 Layer 230 应用内 TON 钱包（app/wallet）：所有权挑战、账号与
+// TON 地址的绑定关系、以及（可选）第三方 provider 转发。为 nil(未配置钱包目录)时
+// wallet.* 一律回 WALLET_UNAVAILABLE，而不是把请求当成未知方法丢弃。
+type WalletService interface {
+	// GetProofChallenge 生成与账号 + MTProto 授权绑定的不可预测挑战。
+	GetProofChallenge(ctx context.Context, userID int64, authKeyID [8]byte) (domain.WalletChallenge, error)
+	// Links 返回给定账号已验证的 TON 地址绑定（只读，不创建）。
+	Links(ctx context.Context, userIDs []int64) ([]domain.WalletLink, error)
+	// State 返回账号当前钱包的绑定与本地账本余额；未绑定钱包时 ok=false，
+	// 调用方应回 walletStateEmpty 而不是伪造一个地址。
+	State(ctx context.Context, userID int64) (link domain.WalletLink, balance int64, ok bool, err error)
+	// ReplaceImported 校验 Ed25519 所有权证明后绑定地址；allowReplacement 为真
+	// 时允许在已有绑定的前提下换绑（调用方须先完成账号密码校验）。
+	ReplaceImported(ctx context.Context, userID int64, authKeyID [8]byte, publicKey []byte, timestamp int, signature []byte, allowReplacement bool) (domain.WalletLink, int64, error)
+	// Create 由 telesrv 生成 TON 钱包：私钥只以密文留在服务端，客户端拿到的
+	// 只有地址、公钥与本地账本余额。未配置服务端密钥时返回能力不可用。
+	Create(ctx context.Context, userID int64, authKeyID [8]byte, allowReplacement bool) (domain.WalletLink, int64, error)
+	// Perform 转发一次 provider JSON 请求。provider 未配置时返回
+	// app/wallet.ErrProviderUnavailable，由 rpc 映射为 503，绝不回落到未知方法。
+	Perform(ctx context.Context, endpoint string, query, payload *string) (string, error)
+	// Transactions 返回账号本地账本的流水。资金流水存在 telesrv 自己的库里，
+	// 不在钱包状态目录里，所以由依赖注入而非 FileStore 提供。
+	Transactions(ctx context.Context, userID int64, query domain.StarsTransactionQuery) (domain.TonTransactionPage, error)
 }
 
 // PremiumService is the domain-only boundary for catalog reads, payment form

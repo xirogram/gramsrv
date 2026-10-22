@@ -1267,7 +1267,23 @@ func (s *Service) saveAccountSettings(ctx context.Context, userID int64, setting
 	return settings, s.settings.SaveAccountSettings(ctx, userID, settings)
 }
 
-// GetNotifySettings 返回某作用域的通知设置（未配置返回零值=继承默认）。
+// ForumTopicNotifySettings loads explicit preferences for a bounded authorized topic page.
+func (s *Service) ForumTopicNotifySettings(ctx context.Context, ownerUserID int64, peer domain.Peer, topicIDs []int) (map[int]domain.PeerNotifySettings, error) {
+	if s == nil || s.notify == nil || ownerUserID <= 0 {
+		return nil, errors.New("forum topic notification store is unavailable")
+	}
+	if peer.Type != domain.PeerTypeChannel || peer.ID <= 0 || len(topicIDs) > 200 {
+		return nil, errors.New("invalid forum topic notification scope")
+	}
+	for _, id := range topicIDs {
+		if id <= 0 || id > domain.MaxMessageBoxID {
+			return nil, errors.New("invalid forum topic identifier")
+		}
+	}
+	return s.notify.GetForumTopicNotifySettings(ctx, ownerUserID, peer, topicIDs)
+}
+
+// GetNotifySettings returns one scope's explicit notification preferences.
 func (s *Service) GetNotifySettings(ctx context.Context, ownerUserID int64, scope domain.NotifyScope) (domain.PeerNotifySettings, error) {
 	if s == nil || s.notify == nil || ownerUserID == 0 {
 		return domain.PeerNotifySettings{}, nil

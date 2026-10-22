@@ -9,6 +9,7 @@ import { displayName, displayPhone, formatDate, formatUnix } from "../lib/format
 import { accountMetrics } from "../lib/metrics";
 import type { Navigate } from "../routing";
 import type { AccountListResponse } from "../types";
+import { SectionTabs } from "../components/SectionTabs";
 
 type AccountCursor = { beforeID: number; beforeActiveUS: number };
 
@@ -99,6 +100,7 @@ export function AccountsPage({ navigate }: { navigate: Navigate }) {
         </>
       }
     >
+      <SectionTabs sectionId="accounts" active="/accounts" navigate={navigate} />
       {error && <Alert>{error}</Alert>}
       <div className="metric-row">
         <Metric label={t("account.currentPage")} value={String(data?.rows.length ?? 0)} />
