@@ -1,9 +1,10 @@
 # Collectible Star gifts: listing flags, value info, withdrawal
 
 What this service implements for collectible (unique) Star gifts on top of the
-Layer 225 TL schema: the saved-gift listing flags, `payments.getUniqueStarGiftValueInfo`,
-and `payments.getStarGiftWithdrawalUrl` with the 2FA SRP gate it shares with the
-self-hosted claim page.
+Layer 232 TL schema: the saved-gift listing flags,
+`payments.getUniqueStarGiftValueInfo`, `payments.getStarGiftWithdrawalUrl`
+(with the 2FA gate it shares with the self-hosted claim page) and
+`payments.deleteStarGift`.
 
 ## Saved gift listing (`getSavedStarGifts` family)
 
@@ -67,11 +68,18 @@ Preconditions are checked in this order, because each later one would otherwise
 reveal state to a caller who has not proven who they are:
 
 1. Known method, non-bot caller (`BOT_METHOD_INVALID`).
-2. `account.CheckPassword` over `inputCheckPasswordSRP` / `inputCheckPasswordEmpty`.
-   There is deliberately no `PASSWORD_MISSING`: `checkSRP` itself accepts only
-   the empty check on accounts without a password, and only a real SRP answer on
-   accounts with one. Wrong answer → `PASSWORD_HASH_INVALID`, stale `srp_id` →
+2. Layer 232 replaced the SRP challenge with a temporary password: the request
+   carries `tmp_password:bytes` instead of `inputCheckPasswordSRP`. This server
+   issues no temporary passwords (there is no `account.getTmpPassword` surface),
+   so a non-empty `tmp_password` cannot be verified and is refused with
+   `PASSWORD_INVALID`. An empty `tmp_password` keeps the historical
+   "no password supplied" semantics: `checkSRP` accepts the empty check only on
+   accounts without a password, and only a real SRP answer on accounts with
+   one. Wrong answer → `PASSWORD_HASH_INVALID`, stale `srp_id` →
    `SRP_ID_INVALID`.
+   Historical profiles (Layer 225–231) still send the SRP challenge; the
+   profile-to-canonical conversion discards it instead of promoting it into a
+   temporary password, so those clients reach the same empty-password check.
 3. Freshness, only when the account has a password: `PASSWORD_TOO_FRESH_<wait>`
    for a recently changed password and `SESSION_TOO_FRESH_<wait>` for a session
    that is younger than the same window (`revenueWithdrawalFreshWait`).
@@ -97,6 +105,29 @@ unique gift. A pending request that has not expired, or a completed one, is
 returned as-is instead of minting a second bearer URL; an expired one is
 reused/updated. Ten concurrent calls therefore collapse onto a single row and a
 single URL — covered by `TestStarGiftWithdrawalConcurrentRecordCollapsesPostgres`.
+
+## `payments.deleteStarGift`
+
+Layer 232 added `payments.deleteStarGift#3cdaf8aa stargift:InputSavedStarGift =
+Bool`. The owner removes a received gift from the profile.
+
+- Only the caller may delete their own gift. A channel gift is a channel asset
+  and is refused (`STARGIFT_OWNER_INVALID`); bots are refused
+  (`BOT_METHOD_INVALID`).
+- The gift row is **not** deleted: upgrade commands, offers and transfers
+  reference it, so the delete is a lifecycle transition
+  (`lifecycle_status='deleted'`, new state in migration
+  `20261023000001_star_gift_deleted_state`). Read paths only project
+  `lifecycle_status='active'`, so the gift leaves the profile, the account
+  rating signal and the saved-gift lists immediately.
+- A gift that was upgraded into a collectible also burns that collectible
+  (`unique_star_gifts.burned`), so it can neither be listed for resale nor
+  exported to the chain afterwards.
+- Refused states (`STARGIFT_INVALID`): converted, exported, burned, already
+  deleted, listed for resale, under a pending purchase offer or under a
+  pending withdrawal request.
+- The gift is dropped from every collection it was part of, and its profile
+  projection is invalidated.
 
 ## Claim page mirror (FlashFragment)
 

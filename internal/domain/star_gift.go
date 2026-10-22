@@ -104,6 +104,9 @@ const (
 	StarGiftLifecycleConverted StarGiftLifecycleStatus = "converted"
 	StarGiftLifecycleBurned    StarGiftLifecycleStatus = "burned"
 	StarGiftLifecycleExported  StarGiftLifecycleStatus = "exported"
+	// StarGiftLifecycleDeleted 是 payments.deleteStarGift 的终态：礼物离开资料页，
+	// 但历史行仍然保留（升级命令、报价、转账记录都引用它，不能硬删）。
+	StarGiftLifecycleDeleted StarGiftLifecycleStatus = "deleted"
 )
 
 func (s StarGiftLifecycleStatus) Live() bool {
@@ -826,6 +829,22 @@ type StarGiftWithdrawalRequest struct {
 	Date   int
 }
 
+// StarGiftDeleteRequest 是 payments.deleteStarGift 的输入：调用者要删掉自己
+// 收到的那份礼物（普通礼物或已升级的藏品）。
+type StarGiftDeleteRequest struct {
+	UserID int64
+	Ref    SavedStarGiftRef
+	Date   int
+}
+
+// StarGiftDeleteResult 报告删除结果。UniqueGiftID 非 0 表示这份礼物同时被
+// 升级成了藏品，藏品也一并作废（burned），不能再上架或导出。
+type StarGiftDeleteResult struct {
+	SavedGiftID  int64
+	UniqueGiftID int64
+	Deleted      bool
+}
+
 type StarGiftWithdrawal struct {
 	ProviderRequestID string
 	URL               string
@@ -1245,8 +1264,11 @@ var (
 	ErrStarGiftOwnerInvalid           = errors.New("stargift: owner invalid")
 	ErrStarGiftTransferUnavailable    = errors.New("stargift: transfer unavailable")
 	ErrStarGiftResaleUnavailable      = errors.New("stargift: resale unavailable")
-	ErrStarGiftOfferInvalid           = errors.New("stargift: offer invalid")
-	ErrStarGiftOfferExpired           = errors.New("stargift: offer expired")
+	// ErrStarGiftDeleteUnavailable 表示这份礼物当前不可删除：已转换、已导出、
+	// 正在出售、有待处理报价或已被删除。
+	ErrStarGiftDeleteUnavailable = errors.New("stargift: delete unavailable")
+	ErrStarGiftOfferInvalid      = errors.New("stargift: offer invalid")
+	ErrStarGiftOfferExpired      = errors.New("stargift: offer expired")
 	// ErrStarGiftRecipientUnavailable 表示收礼人对其它用户呈 deleted 墓碑
 	// （冻结账号），礼物不能再被送出。
 	ErrStarGiftRecipientUnavailable  = errors.New("stargift: recipient account unavailable")

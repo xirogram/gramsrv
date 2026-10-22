@@ -188,6 +188,7 @@ var sensitiveRPCRateGroups = map[uint32]sensitiveRateGroup{
 	tg.PaymentsCraftStarGiftRequestTypeID:                  rateGroupPayment,
 	tg.PaymentsSaveStarGiftRequestTypeID:                   rateGroupPayment,
 	tg.PaymentsConvertStarGiftRequestTypeID:                rateGroupPayment,
+	tg.PaymentsDeleteStarGiftRequestTypeID:                 rateGroupPayment,
 }
 
 // checkSensitiveRPCRateLimit runs in the dispatch pipeline before any handler

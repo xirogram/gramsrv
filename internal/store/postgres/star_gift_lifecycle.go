@@ -1605,6 +1605,83 @@ VALUES($1,$2,$3,$4,$5,$6,$7)`, saved.UniqueGiftID, req.UserID, provider, provide
 	return s.resolveStarGiftWithdrawalByUniqueID(ctx, saved.UniqueGiftID)
 }
 
+// DeleteStarGift implements payments.deleteStarGift. The saved gift row stays
+// (upgrade commands, offers and transfers reference it), so the delete is a
+// lifecycle transition: the gift leaves the profile, it is dropped from every
+// collection and the collectible it was upgraded into is burned so it can
+// neither be listed nor exported afterwards.
+func (s *StarGiftLifecycleStore) DeleteStarGift(ctx context.Context, req domain.StarGiftDeleteRequest) (domain.StarGiftDeleteResult, error) {
+	if s == nil || req.UserID <= 0 || !req.Ref.Valid() || req.Date <= 0 {
+		return domain.StarGiftDeleteResult{}, domain.ErrStarGiftDeleteUnavailable
+	}
+	result := domain.StarGiftDeleteResult{}
+	err := withTx(ctx, s.db, "delete star gift", func(tx pgx.Tx) error {
+		saved, err := lockSavedStarGiftForUpgrade(ctx, tx, req.Ref)
+		if err != nil {
+			return err
+		}
+		if saved.Owner != (domain.Peer{Type: domain.PeerTypeUser, ID: req.UserID}) {
+			return domain.ErrStarGiftOwnerInvalid
+		}
+		if !saved.LifecycleStatus.Live() {
+			return domain.ErrStarGiftDeleteUnavailable
+		}
+		result.SavedGiftID = saved.ID
+		result.UniqueGiftID = saved.UniqueGiftID
+		if saved.UniqueGiftID != 0 {
+			unique, found, err := NewStarGiftStore(tx).UniqueByID(ctx, saved.UniqueGiftID)
+			if err != nil {
+				return err
+			}
+			if !found || unique.Burned || unique.Owner != saved.Owner {
+				return domain.ErrStarGiftDeleteUnavailable
+			}
+			// A collectible that already left for the chain is hosted by TON and
+			// must never be burned from the server side.
+			if unique.OwnerAddress != "" {
+				return domain.ErrStarGiftDeleteUnavailable
+			}
+			var listed bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM star_gift_listings WHERE unique_gift_id=$1)`, unique.ID).Scan(&listed); err != nil {
+				return err
+			}
+			if listed {
+				return domain.ErrStarGiftDeleteUnavailable
+			}
+			var pendingOffer bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM star_gift_offers WHERE unique_gift_id=$1 AND status='pending')`, unique.ID).Scan(&pendingOffer); err != nil {
+				return err
+			}
+			if pendingOffer {
+				return domain.ErrStarGiftDeleteUnavailable
+			}
+			var pendingWithdrawal bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM star_gift_withdrawal_requests WHERE unique_gift_id=$1 AND status='pending')`, unique.ID).Scan(&pendingWithdrawal); err != nil {
+				return err
+			}
+			if pendingWithdrawal {
+				return domain.ErrStarGiftDeleteUnavailable
+			}
+			if _, err := tx.Exec(ctx, `UPDATE unique_star_gifts SET burned=true, updated_at=now() WHERE id=$1`, unique.ID); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM star_gift_collection_items WHERE saved_gift_id=$1`, saved.ID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE peer_star_gifts
+SET lifecycle_status=$2, unsaved=true, pinned_order=0 WHERE id=$1`, saved.ID, string(domain.StarGiftLifecycleDeleted)); err != nil {
+			return err
+		}
+		result.Deleted = true
+		return nil
+	})
+	if err != nil {
+		return domain.StarGiftDeleteResult{}, err
+	}
+	return result, nil
+}
+
 func (s *StarGiftLifecycleStore) ResolveStarGiftWithdrawal(ctx context.Context, providerRequestID string) (domain.StarGiftWithdrawal, bool, error) {
 	providerRequestID = strings.TrimSpace(providerRequestID)
 	if providerRequestID == "" || len(providerRequestID) > 256 {

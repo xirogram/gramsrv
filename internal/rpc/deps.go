@@ -1304,6 +1304,9 @@ type GiftsService interface {
 	DropOriginalDetails(ctx context.Context, req domain.StarGiftDropOriginalDetailsRequest) (domain.StarGiftDropOriginalDetailsResult, error)
 	SetNotifications(ctx context.Context, userID, channelID int64, enabled bool) error
 	Withdraw(ctx context.Context, req domain.StarGiftWithdrawalRequest) (domain.StarGiftWithdrawal, error)
+	// DeleteStarGift removes a received gift from the owner's profile
+	// (payments.deleteStarGift, Layer 232).
+	DeleteStarGift(ctx context.Context, req domain.StarGiftDeleteRequest) (domain.StarGiftDeleteResult, error)
 	TonBalance(ctx context.Context, userID int64) (int64, error)
 	TonTransactions(ctx context.Context, userID int64, query domain.StarsTransactionQuery) (domain.TonTransactionPage, error)
 	IssuePurchaseForm(ctx context.Context, form domain.StarGiftPurchaseForm) (domain.StarGiftPurchaseForm, error)

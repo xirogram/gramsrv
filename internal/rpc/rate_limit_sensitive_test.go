@@ -76,6 +76,7 @@ func TestSensitiveRPCRateLimitGroupTable(t *testing.T) {
 		tg.PaymentsCraftStarGiftRequestTypeID:                  rateGroupPayment,
 		tg.PaymentsSaveStarGiftRequestTypeID:                   rateGroupPayment,
 		tg.PaymentsConvertStarGiftRequestTypeID:                rateGroupPayment,
+		tg.PaymentsDeleteStarGiftRequestTypeID:                 rateGroupPayment,
 	}
 	if len(sensitiveRPCRateGroups) != len(want) {
 		t.Fatalf("group table size = %d, want %d", len(sensitiveRPCRateGroups), len(want))

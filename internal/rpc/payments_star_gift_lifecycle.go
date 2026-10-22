@@ -671,6 +671,48 @@ func (r *Router) onPaymentsTransferStarGift(ctx context.Context, req *tg.Payment
 	return r.starGiftTransferUpdates(ctx, userID, result, false), nil
 }
 
+// onPaymentsDeleteStarGift implements payments.deleteStarGift (Layer 232).
+// 只有礼物主人能删自己的那份礼物；礼物离开资料页，已经升级成的藏品同时作废，
+// 不能再上架或导出。删除不硬删行：升级命令、报价、转账记录都引用这一行。
+func (r *Router) onPaymentsDeleteStarGift(ctx context.Context, req *tg.PaymentsDeleteStarGiftRequest) (bool, error) {
+	if req == nil {
+		return false, inputRequestInvalidErr()
+	}
+	userID, _, err := r.currentUserID(ctx)
+	if err != nil {
+		return false, internalErr()
+	}
+	if r.deps.Gifts == nil {
+		return false, notImplementedErr()
+	}
+	if r.userIsBot(ctx, userID) {
+		return false, botMethodInvalidErr()
+	}
+	ref, ok, err := r.starGiftRefFromInput(ctx, userID, req.Stargift)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return false, starGiftInvalidErr()
+	}
+	// 频道礼物属于频道资产，不走个人删除路径。
+	if ref.Owner.Type != domain.PeerTypeUser || ref.Owner.ID != userID {
+		return false, tgerr.New(400, "STARGIFT_OWNER_INVALID")
+	}
+	result, err := r.deps.Gifts.DeleteStarGift(ctx, domain.StarGiftDeleteRequest{
+		UserID: userID, Ref: ref, Date: int(r.clock.Now().Unix()),
+	})
+	if err != nil {
+		return false, starGiftLifecycleErr(err)
+	}
+	if !result.Deleted {
+		return false, starGiftInvalidErr()
+	}
+	// 礼物离开资料页 → 失效 owner full 投影。
+	r.invalidateStarGiftOwnerProjection(ref.Owner)
+	return true, nil
+}
+
 func (r *Router) onPaymentsGetStarGiftWithdrawalURL(ctx context.Context, req *tg.PaymentsGetStarGiftWithdrawalURLRequest) (*tg.PaymentsStarGiftWithdrawalURL, error) {
 	if req == nil {
 		return nil, starGiftInvalidErr()
@@ -1213,6 +1255,7 @@ func starGiftLifecycleErr(err error) error {
 	case errors.Is(err, domain.ErrStarGiftNotFound), errors.Is(err, domain.ErrStarGiftResaleUnavailable),
 		errors.Is(err, domain.ErrStarGiftTransferUnavailable), errors.Is(err, domain.ErrStarGiftOfferInvalid),
 		errors.Is(err, domain.ErrStarGiftAuctionUnavailable),
+		errors.Is(err, domain.ErrStarGiftDeleteUnavailable),
 		errors.Is(err, domain.ErrStarGiftUnavailable), errors.Is(err, domain.ErrStarGiftInvalid),
 		errors.Is(err, domain.ErrStarGiftCollectibleUnavailable):
 		return starGiftInvalidErr()

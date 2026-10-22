@@ -127,6 +127,9 @@ func (r *Router) registerPayments(d *tlprofile.Dispatcher) {
 	registerRPC[*tg.PaymentsGetStarGiftWithdrawalURLLegacyRequest](d, tlprofile.SemanticMethodPaymentsGetStarGiftWithdrawalURLLegacy, func(ctx context.Context, req *tg.PaymentsGetStarGiftWithdrawalURLLegacyRequest) (any, error) {
 		return r.onPaymentsGetStarGiftWithdrawalURLLegacy(ctx, req)
 	})
+	registerRPC[*tg.PaymentsDeleteStarGiftRequest](d, tlprofile.SemanticMethodPaymentsDeleteStarGift, func(ctx context.Context, req *tg.PaymentsDeleteStarGiftRequest) (any, error) {
+		return r.onPaymentsDeleteStarGift(ctx, req)
+	})
 	registerRPC[*tg.PaymentsSendStarGiftOfferRequest](d, tlprofile.SemanticMethodPaymentsSendStarGiftOffer, func(ctx context.Context, req *tg.PaymentsSendStarGiftOfferRequest) (any, error) {
 		return r.onPaymentsSendStarGiftOffer(ctx, req)
 	})

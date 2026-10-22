@@ -864,6 +864,16 @@ func (s *Service) Withdraw(ctx context.Context, req domain.StarGiftWithdrawalReq
 	return recorded, nil
 }
 
+// DeleteStarGift implements payments.deleteStarGift (Layer 232): the owner
+// removes a received gift from the profile. The gift row survives as audit
+// history, so the delete is a lifecycle transition owned by the store.
+func (s *Service) DeleteStarGift(ctx context.Context, req domain.StarGiftDeleteRequest) (domain.StarGiftDeleteResult, error) {
+	if s == nil || s.lifecycle == nil {
+		return domain.StarGiftDeleteResult{}, domain.ErrStarGiftDeleteUnavailable
+	}
+	return s.lifecycle.DeleteStarGift(ctx, req)
+}
+
 func (s *Service) ResolveWithdrawal(ctx context.Context, providerRequestID string) (domain.StarGiftWithdrawal, bool, error) {
 	if s == nil || s.lifecycle == nil {
 		return domain.StarGiftWithdrawal{}, false, nil

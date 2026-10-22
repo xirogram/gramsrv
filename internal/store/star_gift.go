@@ -108,6 +108,11 @@ type StarGiftLifecycleStore interface {
 	SetStarGiftNotifications(ctx context.Context, userID, channelID int64, enabled bool) error
 	StarGiftNotificationsEnabled(ctx context.Context, userID, channelID int64) (bool, error)
 	RecordStarGiftWithdrawal(ctx context.Context, req domain.StarGiftWithdrawalRequest, provider, providerRequestID, url string, expiresAt int) (domain.StarGiftWithdrawal, error)
+	// DeleteStarGift implements payments.deleteStarGift: it moves the saved
+	// gift into the deleted lifecycle state, drops it from every collection
+	// and burns the collectible it was upgraded into. A gift that is converted,
+	// exported, listed for resale or under a pending offer is refused.
+	DeleteStarGift(ctx context.Context, req domain.StarGiftDeleteRequest) (domain.StarGiftDeleteResult, error)
 	ResolveStarGiftWithdrawal(ctx context.Context, providerRequestID string) (domain.StarGiftWithdrawal, bool, error)
 	CompleteStarGiftWithdrawal(ctx context.Context, providerRequestID string, date int) (domain.StarGiftWithdrawal, error)
 	IssueChannelRevenueWithdrawal(ctx context.Context, req domain.ChannelRevenueWithdrawalRequest) (domain.ChannelRevenueWithdrawal, error)
