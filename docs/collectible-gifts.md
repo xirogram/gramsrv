@@ -69,17 +69,17 @@ reveal state to a caller who has not proven who they are:
 
 1. Known method, non-bot caller (`BOT_METHOD_INVALID`).
 2. Layer 232 replaced the SRP challenge with a temporary password: the request
-   carries `tmp_password:bytes` instead of `inputCheckPasswordSRP`. This server
-   issues no temporary passwords (there is no `account.getTmpPassword` surface),
-   so a non-empty `tmp_password` cannot be verified and is refused with
-   `PASSWORD_INVALID`. An empty `tmp_password` keeps the historical
-   "no password supplied" semantics: `checkSRP` accepts the empty check only on
-   accounts without a password, and only a real SRP answer on accounts with
-   one. Wrong answer → `PASSWORD_HASH_INVALID`, stale `srp_id` →
+   carries `tmp_password:bytes` instead of `inputCheckPasswordSRP`. Accounts
+   without 2FA have no proof to check, so they get `PASSWORD_MISSING` before
+   anything else. The proof itself is a grant issued by
+   `account.getTmpPassword` for this session; a missing, malformed, expired or
+   foreign grant fails closed (`TMP_PASSWORD_INVALID`) and is never treated as
+   an SRP answer.
+   Historical profiles (Layer 225–231) still send the SRP challenge; their
+   constructor is promoted to a separate legacy method and checked with
+   `account.CheckPassword` over `inputCheckPasswordSRP` only — an empty or
+   mismatched check is `PASSWORD_HASH_INVALID`, a stale `srp_id` is
    `SRP_ID_INVALID`.
-   Historical profiles (Layer 225–231) still send the SRP challenge; the
-   profile-to-canonical conversion discards it instead of promoting it into a
-   temporary password, so those clients reach the same empty-password check.
 3. Freshness, only when the account has a password: `PASSWORD_TOO_FRESH_<wait>`
    for a recently changed password and `SESSION_TOO_FRESH_<wait>` for a session
    that is younger than the same window (`revenueWithdrawalFreshWait`).
@@ -128,6 +128,22 @@ Bool`. The owner removes a received gift from the profile.
   deleted, upgraded into a collectible.
 - The gift is dropped from every collection it was part of, and its profile
   projection is invalidated.
+
+### Layer 232 methods that are stubs
+
+The rest of the Layer 232 surface is decoded, so a client gets an explicit
+refusal instead of an unknown-method error, but the business behind it is not
+implemented yet: `messages.setShareTheme`,
+`messages.getShareThemeBackdrops`, `payments.withdrawStarGift`,
+`payments.depositStarGift`, `payments.displayStarGift`,
+`contacts.exportNoPaidMessagesToken`, `contacts.importNoPaidMessagesToken` and
+`wallet.setCardStickers` all answer `NOT_IMPLEMENTED`. They live in
+`internal/rpc/layer232_stubs.go`; each stub owns one semantic registration, so
+implementing one replaces exactly one handler. Note that
+`payments.withdrawStarGift` failing closed also means the wallet withdraw path
+stays where it was: `payments.getStarGiftWithdrawalUrl` remains the only
+export route. `account.getTmpPassword` is no longer a stub: it issues the
+temporary-password grants the withdrawal path checks.
 
 ## Claim page mirror (FlashFragment)
 
