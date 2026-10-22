@@ -25,6 +25,7 @@ func TestChannelsReadHistoryAdvancesForumGeneralReadRPC(t *testing.T) {
 	member, _ := userStore.Create(ctx, domain.User{AccessHash: 72, Phone: "15550007302", FirstName: "Member"})
 	channelStore := memory.NewChannelStore()
 	r := New(Config{}, Deps{
+		Account:  newForumNotifyTestAccount(),
 		Users:    appusers.NewService(userStore),
 		Channels: appchannels.NewService(channelStore),
 	}, zaptest.NewLogger(t), clock.System)

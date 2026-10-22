@@ -1,3 +1,4 @@
+import { X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { api, errorMessage } from "../api";
@@ -46,12 +47,16 @@ export function GiftAttributesModal({ giftID, title, onClose }: {
     );
   }
 
+  // The backdrop does not close this modal. It is the one dialog in the panel
+  // that used to, and it is read-only -- an operator clicking around a pool
+  // table and dismissing it by a stray click loses their place for no reason.
+  // Every other modal in the panel closes on its own close button.
   return createPortal(
-    <div className="modal-backdrop" role="presentation" onClick={onClose}>
-      <section className="modal command-modal" role="dialog" aria-modal="true" aria-label={t("gifts.poolsTitle")} onClick={(e) => e.stopPropagation()}>
+    <div className="modal-backdrop" role="presentation">
+      <section className="modal command-modal" role="dialog" aria-modal="true" aria-label={t("gifts.poolsTitle")}>
         <div className="modal-head">
           <div><div className="eyebrow">{t("gifts.poolsEyebrow")}</div><h2>{title}</h2></div>
-          <button className="icon-btn" type="button" onClick={onClose} aria-label={t("common.close")}>✕</button>
+          <button className="icon-btn" type="button" onClick={onClose} aria-label={t("common.close")}><X size={15} /></button>
         </div>
         <div className="command-body">
           {error && <Alert>{error}</Alert>}

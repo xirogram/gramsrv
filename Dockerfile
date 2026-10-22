@@ -68,6 +68,12 @@ RUN apk add --no-cache ffmpeg openssl \
       /var/lib/telesrv/blob-staging \
       /var/lib/telesrv/maptiles \
       /var/lib/telesrv/livestream
+# The wallet directory is deliberately NOT in the list above. It holds one
+# 0600 JSON per account plus the AES-256-GCM master key, and NewFileStore
+# refuses to open a state directory that is group- or world-accessible.
+# Installing it 0750 alongside the others stopped the server at boot with
+# "wallet state directory must have mode 0700".
+RUN install -d -o telesrv -g telesrv -m 0700 /var/lib/telesrv/wallet
 COPY --from=build-server /out/telesrv /usr/local/bin/telesrv
 COPY --chown=telesrv:telesrv data/langpack/ /usr/share/telesrv/langpack/
 USER 10001:10001

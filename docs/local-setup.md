@@ -116,3 +116,26 @@ After startup, confirm:
 
 For the complete configuration reference, see
 [`docs/configuration.en.md`](configuration.en.md).
+
+## 6. Importing the official Star-gift catalog (optional)
+
+The admin panel can import official gifts explicitly and hash-verified, but it
+reads them from a snapshot directory rather than from Telegram directly —
+pointed at by `TELESRV_OFFICIAL_GIFTS_DIR` (`data/official-gifts` by default).
+An empty or absent directory just means the import screen has nothing to offer;
+nothing else in the panel depends on it.
+
+To fill one, run `cmd/giftfetch`. It needs an authorized **user** session, which
+you get with a QR login — no phone number, no SMS code:
+
+```sh
+SESSION=/root/.giftfetch.session go run ./cmd/giftfetch -login-qr
+# scan the code: Telegram -> Settings -> Devices -> Link Desktop Device
+
+SESSION=/root/.giftfetch.session go run ./cmd/giftfetch \
+    -out /opt/gramsrv/data/official-gifts
+```
+
+The session file is a live account credential; keep it outside the repository
+and out of version control. Full flag reference, the snapshot layout and the
+validation the fetcher performs are in [`docs/giftfetch.md`](giftfetch.md).

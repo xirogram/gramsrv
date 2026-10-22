@@ -18,6 +18,17 @@
 - int、float、bool、duration 的非法文本会回退代码默认值；URL、app scheme、app name 以及登录邮箱依赖关系校验失败会阻止启动。
 - 不要提交真实密码、token、私有 DSN 或 TURN secret。生产环境应使用受保护的 service environment 或密钥管理系统。
 
+启动时若存在 `<配置文件>.example`，服务会以 INFO 报告模板中声明但配置文件和进程环境均未设置的键，以 WARN 报告配置文件中未被模板收录的键。报告只包含键名，不打印值、不写回文件；模板缺失时跳过这项提示性检查。
+
+### 资料审核警告
+
+| 配置项 | 类型 / 代码默认值 | 说明 |
+|---|---|---|
+| `TELESRV_SCAM_WARNING` | string / 内置英文涉诈警告 | 在允许读取的用户/频道 About 和非成员邀请预览中，为 SCAM 对象添加前缀。空值或纯空白使用内置文案。 |
+| `TELESRV_FAKE_WARNING` | string / 内置英文冒充警告 | FAKE 对象的对应前缀；同时存在两个标记时 SCAM 优先。 |
+
+用户 About 隐私隐藏整个字段，包含警告。用户本人、频道创建者及具备 ChangeInfo 权限的管理员读取用于编辑的原始描述。警告只存在于读投影，不落库，也不按匹配文字删除作者输入；客户端仍保留标记徽章。修改配置后需重启。
+
 ## 2. MTProto 监听、传输与资源预算
 
 | 参数 | 类型 / 代码默认值 | 说明与约束 |
@@ -28,6 +39,7 @@
 | `TELESRV_DC` | positive TL int32 / `2` | 服务端输出配置、媒体/DC 元数据和 `channelFull.stats_dc` 使用的规范 DC ID；必须在 `1..2147483647`，否则启动失败。当前单后端不会按它分区密钥交换状态。 |
 | `TELESRV_DEFAULT_COUNTRY_CODE` | ISO alpha-2 / `CN` | `help.getNearestDc` 返回的登录页默认国家。客户端把 `CN` 映射为国际区号 `+86`、`US` 映射为 `+1`。输入会 trim、转大写并校验为国家或自治地区；格式错误或未知值会让启动失败。 |
 | `TELESRV_STRICT_DC_CHECK` | bool / `false` | 默认 `false`，永久与临时密钥交换接受任意 wire int32 DC 标签。设为 `true` 时永久标签必须等于 `TELESRV_DC`、临时标签绝对值必须等于 `TELESRV_DC`；它仅是诊断开关，不提供多 DC 隔离。 |
+| `TELESRV_CHECK_NUMBER_FORMAT` | bool / `false` | 登录身份格式策略。默认 `false` 按国家号码计划规范化可识别号码，并接受计划外 4-32 位、首位非 0 的身份（包括短号、未分配号段和未知国家码）。`true` 额外要求普通号码通过已分配号段校验。两种模式均拒绝前导 0，保留虚拟 `+888` 的独立 7-15 位规则，并禁止保留号 `+42777` 登录。server 与 Admin 必须配置一致；切换严格模式可能使之前接纳的身份无法再使用手机号相关操作，但不会重写存量号码。 |
 | `TELESRV_WEBSOCKET_ENABLE` | bool / `true` | 在 MTProto 监听端口启用 MTProto-over-WebSocket 分流。 |
 | `TELESRV_WEBSOCKET_ALLOWED_ORIGINS` | list / `http://localhost:1234,http://127.0.0.1:1234` | 浏览器 WebSocket origin 白名单；`*` 只用于临时调试。 |
 | `TELESRV_MTPROTO_MAX_CONNECTIONS` | int / `200000` | 全局物理连接 admission 上限；负数关闭该门禁。 |
@@ -706,3 +718,19 @@ active key。不要手工编辑 manifest 或 PEM，不要在各实例上分别�
 ## Cross-collection gift crafting
 
 `TELESRV_STAR_GIFT_CROSS_CRAFT_USER_IDS` is an explicit comma-separated positive user-ID allowlist; empty disables AI cross-collection crafting. A configured AI provider and blob backend are required. Ordinary same-collection catalog crafting remains available.
+
+## 可选钱包与充值能力
+
+`TELESRV_WALLET_STATE_DIR` 默认留空，关闭钱包。显式配置 POSIX 0700 私有目录后
+启用 Layer 230 部分钱包接口；Docker 应使用 `/var/lib/telesrv/wallet`。
+`TELESRV_WALLET_KEY_FILE` 默认为 `data/wallet/keys.key`，Docker 默认位于同一持久
+卷的 wallet/keys.key。主密钥与完整账号状态必须共同备份；首次生成 0600 文件，
+重启校验已有密文与配置密钥一致，不推断没有存量证据的 raw-key 编码。
+可选 `TELESRV_WALLET_TONCENTER_API_KEY` 要求已配置目录；留空不访问外部 TON。
+余额/流水来自本服 nanoton 账本，不代表链上到账；链上发送、gasless、备份/导出和
+TON Connect 会话尚未实现，开启目录不等于开启这些能力。
+
+`TELESRV_DONATIONS_ENABLED=false` 默认禁止生成 donations 助记词和启动链监听。
+已有使用该功能的部署升级前须显式设为 true 并启用/配置所需链。donations 加密密钥
+与钱包主密钥是不同文件。新纯数据迁移关闭空/种子占位 RPC 链，保留已配置远端链。
+关闭总开关不删除已存在的钱包、地址或充值记录。

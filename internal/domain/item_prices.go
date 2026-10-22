@@ -29,24 +29,48 @@ type ItemPriceUpdateRequest struct {
 	Enabled     bool   `json:"enabled"`
 }
 
-// ShopSettingStarsRate is the shop_settings key holding FG Stars per one
-// Telegram Star — the rate the bot multiplies star purchases by.
+// ShopSettingStarsRate is the shop_settings key holding how many server Stars
+// one Telegram Star buys — the rate the bot multiplies a Stars purchase by, and
+// the only input to the stars_N packages.
 const ShopSettingStarsRate = "stars_rate"
 
-// DefaultItemPrices mirrors the flashgram-bot catalog(): the prices a fresh
-// deployment shows before any override row exists. The bot treats the server
-// list as authoritative, so keeping this in sync with the bot's catalog() is
-// what makes an admin edit visible everywhere at once.
+// DefaultItemPrices mirrors the `fixed` array of the store bot's catalog.js
+// (cmd/bots/grammystore/src/catalog.js): the prices a fresh deployment shows
+// before any override row exists. The bot treats the server list as
+// authoritative for what it charges, so an admin edit here changes the shop.
+//
+// This list is a copy of another repository's file, and a copy is what goes
+// stale quietly. It had: three products were priced differently from the bot,
+// two of the three username tiers were missing entirely -- so they could never
+// be priced from the panel at all -- and three rows were listed for products
+// the bot does not sell. TestDefaultItemPricesMirrorBotCatalog parses
+// catalog.js and fails on any difference, in either direction; keep the two in
+// step by changing both, not this file alone.
+//
+// Titles come from the bot's catalog too, minus the FlashGram prefix: the
+// server's own name is configurable (see Server Settings -> Server identity)
+// and the shop should read as the operator's, not as the reference build's.
+//
+// The bot's stars_N packages are deliberately absent. It derives them from
+// shop_settings.stars_rate rather than reading a per-product price, so there is
+// nothing for a row here to override -- they are surfaced on the admin page as
+// read-only instead. TestBotStarPackagesAreNotPriced pins that.
 var DefaultItemPrices = []ItemPrice{
-	{ProductCode: "premium_1m", Title: "FlashGram Premium — 1 месяц", StarsPrice: 20, Enabled: true},
-	{ProductCode: "premium_3m", Title: "FlashGram Premium — 3 месяца", StarsPrice: 40, Enabled: true},
-	{ProductCode: "num_short", Title: "Анонимный номер +888 8 XXX", StarsPrice: 125, Enabled: true},
-	{ProductCode: "num_long", Title: "Анонимный номер +888 0XXX XXXX", StarsPrice: 50, Enabled: true},
-	{ProductCode: "uname_10", Title: "NFT Username (5-32)", StarsPrice: 50, Bid: 10, Enabled: true},
-	{ProductCode: "uname_5000", Title: "NFT Username (4 - @user)", StarsPrice: 85, Bid: 5000, Enabled: true},
-	{ProductCode: "verify_major", Title: "Сторонняя верификация — @newmajorbot", StarsPrice: 200, Enabled: true},
-	{ProductCode: "verify_hold", Title: "Сторонняя верификация — @holddbot", StarsPrice: 200, Enabled: true},
+	{ProductCode: "premium_1m", Title: "Premium — 1 month", StarsPrice: 20, Enabled: true},
+	{ProductCode: "premium_3m", Title: "Premium — 3 months", StarsPrice: 40, Enabled: true},
+	{ProductCode: "num_short", Title: "Anonymous +888 8 XXX", StarsPrice: 50, Enabled: true},
+	{ProductCode: "num_long", Title: "Anonymous +888 0XXX XXXX", StarsPrice: 25, Enabled: true},
+	{ProductCode: "uname_10", Title: "Collectible username — 10 TON", StarsPrice: 10, Bid: 10, Enabled: true},
+	{ProductCode: "uname_100", Title: "Collectible username — 100 TON", StarsPrice: 30, Bid: 100, Enabled: true},
+	{ProductCode: "uname_1000", Title: "Collectible username — 1000 TON", StarsPrice: 30, Bid: 1000, Enabled: true},
 }
+
+// DefaultStarsPackageSizes are the Telegram-Star package sizes the store bot
+// offers, in the order catalog.js lists them. Each is sold for that many
+// Telegram Stars and credits package * stars_rate server Stars, so its price is
+// the package size itself rather than a per-product figure: the admin page
+// lists these read-only, and the single rate above them is what changes them.
+var DefaultStarsPackageSizes = []int{1, 5, 10, 25, 50, 100}
 
 // MergeItemPrices overlays stored overrides onto the catalog defaults. Rows
 // for codes the defaults do not know (a product added on the bot side first)

@@ -36,6 +36,8 @@ type AccountSettingsBatchStore interface {
 // NotifySettingsStore persists per-scope notification settings (specific peer /
 // forum topic / the three category defaults: users, chats, broadcasts).
 type NotifySettingsStore interface {
+	// GetForumTopicNotifySettings loads one bounded topic page for one owner and peer.
+	GetForumTopicNotifySettings(ctx context.Context, ownerUserID int64, peer domain.Peer, topicIDs []int) (map[int]domain.PeerNotifySettings, error)
 	GetNotifySettings(ctx context.Context, ownerUserID int64, scope domain.NotifyScope) (domain.PeerNotifySettings, bool, error)
 	SaveNotifySettings(ctx context.Context, ownerUserID int64, scope domain.NotifyScope, settings domain.PeerNotifySettings) error
 	ResetNotifySettings(ctx context.Context, ownerUserID int64) error

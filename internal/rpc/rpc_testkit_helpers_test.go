@@ -46,6 +46,7 @@ func newRPCChannelFixture(t *testing.T) *rpcChannelFixture {
 		users:    userStore,
 		channels: channelStore,
 		router: New(Config{}, Deps{
+			Account:  newForumNotifyTestAccount(),
 			Users:    appusers.NewService(userStore),
 			Channels: appchannels.NewService(channelStore),
 		}, zaptest.NewLogger(t), clock.System),

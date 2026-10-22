@@ -197,6 +197,19 @@ func notifySettingsKeyOf(owner int64, scope domain.NotifyScope) notifySettingsKe
 	return key
 }
 
+func (s *PasswordStore) GetForumTopicNotifySettings(_ context.Context, ownerUserID int64, peer domain.Peer, topicIDs []int) (map[int]domain.PeerNotifySettings, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make(map[int]domain.PeerNotifySettings, len(topicIDs))
+	for _, id := range topicIDs {
+		key := notifySettingsKeyOf(ownerUserID, domain.NotifyScope{Kind: domain.NotifyScopePeer, Peer: peer, TopicID: id})
+		if settings, ok := s.notifySettings[key]; ok {
+			out[id] = settings.Clone()
+		}
+	}
+	return out, nil
+}
+
 func (s *PasswordStore) GetNotifySettings(_ context.Context, ownerUserID int64, scope domain.NotifyScope) (domain.PeerNotifySettings, bool, error) {
 	s.mu.RLock()
 	settings, ok := s.notifySettings[notifySettingsKeyOf(ownerUserID, scope)]

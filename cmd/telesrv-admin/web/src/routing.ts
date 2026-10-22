@@ -35,18 +35,20 @@ export function routeTitle(pathname: string, t: TFunction): string {
   if (pathname.startsWith("/channels")) return t("route.channels");
   if (pathname.startsWith("/bots")) return t("route.bots");
   if (pathname.startsWith("/broadcasts")) return t("route.broadcasts");
-  if (pathname.startsWith("/monetization") || pathname.startsWith("/premium")) return t("route.premium");
-	if (pathname.startsWith("/star-issue")) return t("route.starIssue");
+  if (pathname.startsWith("/monetization") || pathname.startsWith("/premium") || pathname.startsWith("/star-issue")) return t("route.premium");
   if (pathname.startsWith("/moderation")) return t("route.moderation");
   if (pathname.startsWith("/stickers")) return t("route.stickers");
   if (pathname.startsWith("/emoji")) return t("route.emoji");
-	if (pathname.startsWith("/gif-catalog")) return t("route.gifCatalog");
+  if (pathname.startsWith("/gif-catalog")) return t("route.gifCatalog");
   if (pathname.startsWith("/messages")) return t("route.messages");
-	if (pathname.startsWith("/give-gifts")) return t("route.giveGifts");
-	if (pathname.startsWith("/gifts")) return t("route.gifts");
-	if (pathname.startsWith("/auctions")) return t("route.auctions");
+  if (pathname.startsWith("/give-gifts")) return t("route.giveGifts");
+  if (pathname.startsWith("/gifts")) return t("route.gifts");
+  if (pathname.startsWith("/auctions")) return t("route.auctions");
   if (pathname.startsWith("/donations")) return t("route.donations");
   if (pathname.startsWith("/prices")) return t("route.prices");
+  // "/statistics" and "/" both render the overview: the statistics charts were
+  // folded into the dashboard rather than left as a page of their own, and the
+  // old URL still has to read as the overview in the topbar.
   return t("route.dashboard");
 }
 
@@ -67,16 +69,15 @@ export function routeSubtitle(pathname: string, t: TFunction): string {
   if (pathname.startsWith("/channels")) return t("route.channelsSubtitle");
   if (pathname.startsWith("/bots")) return t("route.botsSubtitle");
   if (pathname.startsWith("/broadcasts")) return t("route.broadcastsSubtitle");
-  if (pathname.startsWith("/monetization") || pathname.startsWith("/premium")) return t("route.premiumSubtitle");
-	if (pathname.startsWith("/star-issue")) return t("route.starIssueSubtitle");
+  if (pathname.startsWith("/monetization") || pathname.startsWith("/premium") || pathname.startsWith("/star-issue")) return t("route.premiumSubtitle");
   if (pathname.startsWith("/moderation")) return t("route.moderationSubtitle");
   if (pathname.startsWith("/stickers")) return t("route.stickersSubtitle");
   if (pathname.startsWith("/emoji")) return t("route.emojiSubtitle");
-	if (pathname.startsWith("/gif-catalog")) return t("route.gifCatalogSubtitle");
+  if (pathname.startsWith("/gif-catalog")) return t("route.gifCatalogSubtitle");
   if (pathname.startsWith("/messages")) return t("route.messagesSubtitle");
-	if (pathname.startsWith("/give-gifts")) return t("route.giveGiftsSubtitle");
-	if (pathname.startsWith("/gifts")) return t("route.giftsSubtitle");
-	if (pathname.startsWith("/auctions")) return t("route.auctionsSubtitle");
+  if (pathname.startsWith("/give-gifts")) return t("route.giveGiftsSubtitle");
+  if (pathname.startsWith("/gifts")) return t("route.giftsSubtitle");
+  if (pathname.startsWith("/auctions")) return t("route.auctionsSubtitle");
   if (pathname.startsWith("/donations")) return t("route.donationsSubtitle");
   if (pathname.startsWith("/prices")) return t("route.pricesSubtitle");
   return t("route.dashboardSubtitle");

@@ -318,6 +318,17 @@ func (r *Router) buildUserFullProjection(ctx context.Context, currentUserID int6
 	if !visibility[domain.PrivacyKeyAbout] {
 		about = ""
 	}
+	// SCAM/FAKE: the warning is server-authored, so it rides the same privacy
+	// gate as the owner's own text -- a viewer without About access sees the
+	// mark's badge only, never the injected sentence. Prepended, never stored:
+	// the warning lives in this projection alone (domain.ModerationProfileWarning).
+	//
+	// Skipped for the owner's own view: clients prefill the bio editor from this
+	// same About, so injecting the line there would put our warning into the box
+	// the owner is about to edit (and it would come back through updateProfile).
+	if u.ID != currentUserID && visibility[domain.PrivacyKeyAbout] {
+		about = domain.ModerationProfileWarning(u.Scam, u.Fake, about)
+	}
 	full := tg.UserFull{
 		ID:             u.ID,
 		About:          about,

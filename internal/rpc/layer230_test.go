@@ -31,18 +31,49 @@ func TestLayer230AdditionalBotUsernameRejected(t *testing.T) {
 	}
 }
 
-func TestLayer230WalletRemainsTracedUnimplemented(t *testing.T) {
+// Registered read stubs and unsupported capabilities must have explicit results.
+// Client polling does not make an unimplemented transfer/relay successful.
+func TestLayer230WalletSurfaceIsFullyRegistered(t *testing.T) {
 	core, logs := observer.New(zap.WarnLevel)
-	r := New(Config{DC: 2, IP: "127.0.0.1", Port: 2398}, Deps{}, zap.New(core), clock.System)
-	var wire bin.Buffer
-	request := &tg.InvokeWithLayerRequest{Layer: 230, Query: &tg.WalletGetStateRequest{}}
-	if err := request.Encode(&wire); err != nil {
-		t.Fatal(err)
+	// A wallet service is present on purpose: the point is what each method
+	// answers when the wallet exists. A router without one reports
+	// WALLET_UNAVAILABLE for all of them, which is covered separately.
+	r := New(Config{DC: 2, IP: "127.0.0.1", Port: 2398}, Deps{Wallet: &walletRPCFixture{}}, zap.New(core), clock.System)
+
+	ctx := WithAuthKeyID(WithUserID(context.Background(), 1), [8]byte{1})
+	answer := map[string]bin.Object{
+		"getNfts":      &tg.WalletGetNftsRequest{},
+		"tonConnect":   &tg.WalletTonConnectGetSessionsRequest{},
+		"onramp":       &tg.PaymentsGetOnrampProvidersRequest{},
+		"transactions": &tg.WalletGetTransactionsRequest{},
 	}
-	if _, _, err := r.DispatchWithMethod(WithUserID(context.Background(), 1), [8]byte{1}, 230, &wire); !tgerr.Is(err, "NOT_IMPLEMENTED") {
-		t.Fatalf("unimplemented wallet: %v", err)
+	for name, query := range answer {
+		wire := bin.Buffer{}
+		if err := (&tg.InvokeWithLayerRequest{Layer: 230, Query: query}).Encode(&wire); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := r.DispatchWithMethod(ctx, [8]byte{1}, 230, &wire); err != nil {
+			t.Fatalf("%s must answer, got %v", name, err)
+		}
 	}
-	if logs.FilterMessage("Unhandled RPC (compatibility trace)").Len() != 1 {
-		t.Fatalf("wallet trace missing: %+v", logs.All())
+
+	for name, query := range map[string]bin.Object{
+		"gasless":          &tg.WalletGetGaslessInfoRequest{},
+		"streaming":        &tg.ToncenterGetStreamingURLRequest{},
+		"tonConnectCreate": &tg.WalletTonConnectCreateSessionRequest{},
+	} {
+		wire := bin.Buffer{}
+		if err := (&tg.InvokeWithLayerRequest{Layer: 230, Query: query}).Encode(&wire); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := r.DispatchWithMethod(ctx, [8]byte{1}, 230, &wire); !tgerr.Is(err, "WALLET_UNAVAILABLE") {
+			t.Fatalf("%s: %v, want WALLET_UNAVAILABLE", name, err)
+		}
+	}
+
+	// Nothing on the wallet surface may trace: a traced method is a warning per
+	// poll, and these are polled continuously.
+	if got := logs.FilterMessage("Unhandled RPC (compatibility trace)").Len(); got != 0 {
+		t.Fatalf("trace count = %d, want 0: %+v", got, logs.All())
 	}
 }

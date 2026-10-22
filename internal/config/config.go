@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -47,6 +48,10 @@ type Config struct {
 	// partitioning auth keys, sessions, or business state. See
 	// mtprotoedge.Options.StrictDC for the optional strict behavior.
 	StrictDCCheck bool
+	// CheckNumberFormat 要求普通手机号通过已分配号段校验。默认关闭，
+	// 国家号码计划无法描述的 4-32 位非零开头号码也可作为登录身份。
+	// +888 虚拟号码与保留系统号继续使用各自的独立规则。
+	CheckNumberFormat bool
 	// MTProtoMaxConnections / PerIP 覆盖 raw Accept、codec sniff、握手到认证 session
 	// 的完整物理连接生命周期；负数关闭对应 admission 上限。
 	MTProtoMaxConnections      int
@@ -177,6 +182,16 @@ type Config struct {
 	TelegramLoginRetention         time.Duration
 	TelegramLoginSweepInterval     time.Duration
 	TelegramLoginSweepBatch        int
+	// WalletStateDir 是 Layer 230 应用内 TON 钱包的私有状态目录：每个账号一份
+	// 0600 JSON（挑战 + 已验证地址绑定），目录必须没有 group/other 权限。留空
+	// 即禁用钱包，此时 wallet.* 回 WALLET_UNAVAILABLE。
+	WalletStateDir string
+	// WalletKeyFile 是钱包私钥的 AES-256-GCM 主密钥文件。缺失时首次启动生成
+	// 0600 文件；与 MTProto RSA 身份密钥同属 data/ 下的“必须备份”文件。
+	WalletKeyFile string
+	// WalletToncenterAPIKey 选配。留空表示不连接任何 TON provider，
+	// toncenter.performApiRequest 直接回 WALLET_PROVIDER_UNAVAILABLE。
+	WalletToncenterAPIKey string
 	// Admin UI 独立进程配置项保留在统一配置中，cmd/telesrv-admin 也按同名 env 读取。
 	AdminUIAddr     string
 	AdminUIPassword string
@@ -681,11 +696,19 @@ type Config struct {
 	// RatingActivityCap bounds the activity component so activity alone cannot
 	// outweigh Stars and moderation; 0 leaves it uncapped.
 	RatingActivityCap int64
+	// DonationsEnabled is the master switch for crypto donations (deposit ->
+	// Stars). OFF by default, and that default is the point: the feature takes
+	// custody of real funds (a BIP39 mnemonic in the database, encrypted with a
+	// locally-managed key) and dials third-party chain endpoints, so neither
+	// should happen to a deployment that never asked for it. Turning it on
+	// provisions the wallet and starts a watcher per enabled chain; each chain
+	// still has to be enabled separately in the admin panel.
+	DonationsEnabled bool
 	// DonationWalletKeyPath is where the crypto donations AES-256-GCM
-	// encryption key lives on disk -- generated automatically on first run,
-	// same "works out of the box" pattern as RSAKeyPath. The wallet mnemonic
-	// itself is generated automatically too, the first time the server
-	// starts with a store that doesn't have one yet. See docs/donations.md.
+	// encryption key lives on disk -- generated automatically the first time
+	// donations are enabled, same pattern as RSAKeyPath. Losing this file
+	// means losing the wallet: the encrypted seed in the database cannot be
+	// decrypted without it. See docs/donations.md.
 	DonationWalletKeyPath string
 	// DonationWalletKey, if set, overrides DonationWalletKeyPath with a
 	// literal 64-hex-char key instead of reading/generating a local file --
@@ -725,6 +748,16 @@ type Config struct {
 	// message send, so delivery cadence is a worker property.
 	VerificationNotifyInterval time.Duration
 	VerificationNotifyBatch    int
+	// ScamProfileWarning / FakeProfileWarning are the first line the server
+	// prepends to a peer's About in getFullUser / channels.getFullChannel and
+	// the chat-invite preview after an admin flags the peer SCAM/FAKE. Official
+	// clients render their own localized badge from the flag, but the badge is
+	// easy to miss; this text makes the mark part of the description itself,
+	// shown above the owner's own text. Empty keeps built-in English defaults
+	// (domain.ModerationProfileWarning). The stored description is never
+	// rewritten -- the warning lives only in the read projection.
+	ScamProfileWarning string
+	FakeProfileWarning string
 	// Broadcast worker enumerates all-user campaigns and delivers claimed
 	// recipients in bounded batches. Lease permits another instance to recover a
 	// claim after a crash; it is not a message timeout.
@@ -971,6 +1004,7 @@ func Load() (Config, error) {
 		DC:                                envIntOr("TELESRV_DC", 2),
 		DefaultCountryCode:                countryCode,
 		StrictDCCheck:                     envBoolOr("TELESRV_STRICT_DC_CHECK", false),
+		CheckNumberFormat:                 envBoolOr("TELESRV_CHECK_NUMBER_FORMAT", false),
 		MTProtoMaxConnections:             envIntOr("TELESRV_MTPROTO_MAX_CONNECTIONS", 200000),
 		MTProtoMaxConnectionsPerIP:        envIntOr("TELESRV_MTPROTO_MAX_CONNECTIONS_PER_IP", 4096),
 		MTProtoMaxConcurrentHandshakes:    envIntOr("TELESRV_MTPROTO_MAX_CONCURRENT_HANDSHAKES", 256),
@@ -1040,6 +1074,9 @@ func Load() (Config, error) {
 		TelegramLoginRetention:                envDurationOr("TELESRV_TELEGRAM_LOGIN_RETENTION", 7*24*time.Hour),
 		TelegramLoginSweepInterval:            envDurationOr("TELESRV_TELEGRAM_LOGIN_SWEEP_INTERVAL", 5*time.Minute),
 		TelegramLoginSweepBatch:               envIntOr("TELESRV_TELEGRAM_LOGIN_SWEEP_BATCH", 500),
+		WalletStateDir:                        strings.TrimSpace(envAllowEmptyOr("TELESRV_WALLET_STATE_DIR", "")),
+		WalletKeyFile:                         envOr("TELESRV_WALLET_KEY_FILE", "data/wallet/keys.key"),
+		WalletToncenterAPIKey:                 strings.TrimSpace(envAllowEmptyOr("TELESRV_WALLET_TONCENTER_API_KEY", "")),
 		AdminUIPermissions:                    envListOr("TELESRV_ADMIN_UI_PERMISSIONS", []string{adminPermissionAll}),
 		AdminScopedTokens:                     adminScopedTokens,
 		GeoIPEndpoints:                        envListOr("TELESRV_GEOIP_ENDPOINTS", nil),
@@ -1272,6 +1309,7 @@ func Load() (Config, error) {
 		StarGiftResellDelay:              envDurationOr("TELESRV_STARGIFT_RESELL_DELAY", 0),
 		StarGiftCraftDelay:               envDurationOr("TELESRV_STARGIFT_CRAFT_DELAY", 0),
 		StarGiftCraftChancePermille:      envIntOr("TELESRV_STARGIFT_CRAFT_CHANCE_PERMILLE", 250),
+		DonationsEnabled:                 envBoolOr("TELESRV_DONATIONS_ENABLED", false),
 		DonationWalletKeyPath:            envOr("TELESRV_DONATION_WALLET_KEY_PATH", "data/donation_wallet.key"),
 		DonationWalletKey:                strings.TrimSpace(envAllowEmptyOr("TELESRV_DONATION_WALLET_KEY", "")),
 		DonationPollInterval:             envDurationOr("TELESRV_DONATION_POLL_INTERVAL", 5*time.Second),
@@ -1307,6 +1345,10 @@ func Load() (Config, error) {
 		VerificationBotRateWindow:    envDurationOr("TELESRV_VERIFICATION_BOT_RATE_WINDOW", time.Minute),
 		VerificationNotifyInterval:   envDurationOr("TELESRV_VERIFICATION_NOTIFY_INTERVAL", 15*time.Second),
 		VerificationNotifyBatch:      envIntOr("TELESRV_VERIFICATION_NOTIFY_BATCH", 50),
+		// Empty keeps the built-in English defaults: domain trims and falls
+		// back when the stored text is blank (domain.SetModerationProfileWarning).
+		ScamProfileWarning:           envOr("TELESRV_SCAM_WARNING", ""),
+		FakeProfileWarning:           envOr("TELESRV_FAKE_WARNING", ""),
 		BroadcastWorkerInterval:      envDurationOr("TELESRV_BROADCAST_WORKER_INTERVAL", 3*time.Second),
 		BroadcastWorkerLease:         envDurationOr("TELESRV_BROADCAST_WORKER_LEASE", 30*time.Second),
 		BroadcastMaterializeBatch:    envIntOr("TELESRV_BROADCAST_MATERIALIZE_BATCH", 200),
@@ -1364,6 +1406,9 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("TELESRV_PROFILE_PHOTO_CACHE_TTL must be greater than zero and at most 168h")
 	}
 	if err := validateStarGiftConfig(cfg); err != nil {
+		return Config{}, err
+	}
+	if err := validateWalletConfig(cfg); err != nil {
 		return Config{}, err
 	}
 	if err := validateAccountRatingConfig(cfg); err != nil {
@@ -1791,6 +1836,24 @@ func validateTelegramLoginConfig(cfg Config) error {
 		if _, err := netip.ParsePrefix(strings.TrimSpace(raw)); err != nil {
 			return fmt.Errorf("TELESRV_TELEGRAM_LOGIN_TRUSTED_PROXY_CIDRS contains invalid CIDR %q: %w", raw, err)
 		}
+	}
+	return nil
+}
+
+func validateWalletConfig(cfg Config) error {
+	// 钱包目录留空即禁用，此时不要求密钥文件存在；启用时必须给出私钥主密钥
+	// 路径，否则钱包状态会被写入明文风险无法接受的形态。
+	if cfg.WalletStateDir == "" {
+		if cfg.WalletToncenterAPIKey != "" {
+			return fmt.Errorf("TELESRV_WALLET_TONCENTER_API_KEY requires TELESRV_WALLET_STATE_DIR")
+		}
+		return nil
+	}
+	if strings.TrimSpace(cfg.WalletKeyFile) == "" {
+		return fmt.Errorf("TELESRV_WALLET_KEY_FILE must be set when TELESRV_WALLET_STATE_DIR is set")
+	}
+	if filepath.Clean(cfg.WalletStateDir) == string(filepath.Separator) {
+		return fmt.Errorf("TELESRV_WALLET_STATE_DIR must not be the filesystem root")
 	}
 	return nil
 }
@@ -2245,11 +2308,7 @@ func defaultAIProviderAPIKey(env envSource, name string) string {
 type envSource map[string]string
 
 func loadConfigEnv() (envSource, error) {
-	path, explicit := os.LookupEnv("TELESRV_CONFIG")
-	if !explicit {
-		path = defaultConfigFile
-	}
-	path = strings.TrimSpace(path)
+	path, explicit := configFilePath()
 	if path == "" {
 		return nil, nil
 	}
@@ -2261,6 +2320,18 @@ func loadConfigEnv() (envSource, error) {
 		return nil, fmt.Errorf("config file %q: %w", path, err)
 	}
 	return env, nil
+}
+
+// configFilePath 解析配置文件路径：TELESRV_CONFIG 显式指定，否则用默认 .env；
+// 返回值同时报告该路径是否为显式指定（显式路径缺失是硬错误，缺省缺失则回落到
+// 纯进程环境）。TrimSpace 后为空表示调用方应跳过文件读取。EnvDrift 用同一规则
+// 定位被比对的文件，避免两处口径不一致。
+func configFilePath() (path string, explicit bool) {
+	path, explicit = os.LookupEnv("TELESRV_CONFIG")
+	if !explicit {
+		path = defaultConfigFile
+	}
+	return strings.TrimSpace(path), explicit
 }
 
 func readEnvFile(path string) (envSource, error) {

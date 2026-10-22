@@ -23,10 +23,11 @@ func TestStarGiftCollectibleUpgradeAggregatePostgres(t *testing.T) {
 	baseDocumentID := time.Now().UnixNano() & 0x7ffffffffffff000
 	entry, err := gifts.CreateCatalogRevision(ctx, domain.StarGiftCatalogWrite{
 		Title: "Comet", Stars: 50, ConvertStars: 25, Enabled: true,
-		Document:  collectibleTestDocument(baseDocumentID, "gift.tgs"),
-		Blob:      collectibleTestBlob(baseDocumentID, "gift"),
-		Animation: collectibleTestAnimation("gift.tgs"),
-		Actor:     "integration", CommandID: "catalog-" + suffix,
+		ReleasedBy: domain.Peer{Type: domain.PeerTypeUser, ID: sender.ID},
+		Document:   collectibleTestDocument(baseDocumentID, "gift.tgs"),
+		Blob:       collectibleTestBlob(baseDocumentID, "gift"),
+		Animation:  collectibleTestAnimation("gift.tgs"),
+		Actor:      "integration", CommandID: "catalog-" + suffix,
 	})
 	if err != nil {
 		t.Fatalf("create collectible catalog gift: %v", err)
@@ -109,6 +110,16 @@ func TestStarGiftCollectibleUpgradeAggregatePostgres(t *testing.T) {
 		Owner: ownerPeer, FromUserID: sender.ID, GiftID: entry.Gift.ID, RevisionID: entry.Gift.RevisionID,
 		Date: 1700001000, ConvertStars: 25, Message: "original",
 	})
+	// A catalog update after purchase must not change the original issuer.
+	if _, err := gifts.CreateCatalogRevision(ctx, domain.StarGiftCatalogWrite{
+		GiftID: entry.Gift.ID, Title: "Changed Comet", Stars: 50, ConvertStars: 25, Enabled: true,
+		ReleasedBy: ownerPeer,
+		Document:   collectibleTestDocument(baseDocumentID+99, "gift-updated.tgs"),
+		Blob:       collectibleTestBlob(baseDocumentID+99, "gift-updated"), Animation: collectibleTestAnimation("gift-updated.tgs"),
+		Actor: "integration", CommandID: "catalog-update-" + suffix,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	savedID := saved.ID
 	stars := NewStarsStore(pool)
 	if _, _, err := stars.EnsureGrant(ctx, owner.ID, 1000, 1700001001); err != nil {
@@ -119,10 +130,18 @@ func TestStarGiftCollectibleUpgradeAggregatePostgres(t *testing.T) {
 		UserID: owner.ID, Ref: domain.SavedStarGiftRef{Owner: ownerPeer, MsgID: saved.MsgID},
 		KeepOriginalDetails: true, ChargeStars: 100, FormID: 991,
 		CommandKey: "paid-" + suffix, Date: 1700001002,
+		// This aggregate test asserts these exact attributes; keep the production
+		// random sampler out of this fixture's expected-name assertions.
+		ModelAttributeID:    poolRevision.Models[0].ID,
+		PatternAttributeID:  poolRevision.Patterns[0].ID,
+		BackdropAttributeID: poolRevision.Backdrops[0].ID,
 	}
 	upgraded, err := upgrades.UpgradeStarGift(ctx, req)
 	if err != nil {
 		t.Fatalf("upgrade star gift: %v", err)
+	}
+	if upgraded.Unique.ReleasedBy != (domain.Peer{Type: domain.PeerTypeUser, ID: sender.ID}) || upgraded.Unique.Title != "Comet" {
+		t.Fatalf("upgrade lost immutable issuer/title: %+v", upgraded.Unique)
 	}
 	if upgraded.Duplicate || upgraded.Unique.Num != 1 || upgraded.Unique.Slug != "comet-"+suffix+"-1" ||
 		upgraded.Unique.Model.Name != "Aurora" || upgraded.Unique.Pattern.Name != "Orbit" ||
@@ -210,6 +229,9 @@ WHERE owner_user_id=$1 AND msg_id=$2`, sender.ID, ownerMessage.ID).Scan(&senderA
 	replayed, err := upgrades.UpgradeStarGift(ctx, req)
 	if err != nil {
 		t.Fatalf("replay upgrade: %v", err)
+	}
+	if replayed.Unique.ReleasedBy != upgraded.Unique.ReleasedBy {
+		t.Fatal("replay changed issuer")
 	}
 	if !replayed.Duplicate || replayed.Unique.ID != upgraded.Unique.ID || replayed.Balance.Balance != 900 ||
 		upgradedSourceEditForUser(replayed, owner.ID).Event.Pts != ownerSourceEdit.Event.Pts {
@@ -629,8 +651,9 @@ func TestAdminUniqueStarGiftGrantIsAtomicAndReplayable(t *testing.T) {
 	baseDocumentID := time.Now().UnixNano() & 0x7ffffffffffff000
 	entry, err := gifts.CreateCatalogRevision(ctx, domain.StarGiftCatalogWrite{
 		Title: "Admin Grant " + suffix, Stars: 50, ConvertStars: 25, Enabled: true,
-		Document: collectibleTestDocument(baseDocumentID, "admin-grant-gift.tgs"),
-		Blob:     collectibleTestBlob(baseDocumentID, "admin-grant-gift"), Animation: collectibleTestAnimation("admin-grant-gift.tgs"),
+		ReleasedBy: domain.Peer{Type: domain.PeerTypeUser, ID: recipient.ID},
+		Document:   collectibleTestDocument(baseDocumentID, "admin-grant-gift.tgs"),
+		Blob:       collectibleTestBlob(baseDocumentID, "admin-grant-gift"), Animation: collectibleTestAnimation("admin-grant-gift.tgs"),
 		Actor: "integration", CommandID: "admin-grant-catalog-" + suffix,
 	})
 	if err != nil {
@@ -702,6 +725,9 @@ func TestAdminUniqueStarGiftGrantIsAtomicAndReplayable(t *testing.T) {
 	granted, err := upgrades.GrantUniqueStarGift(ctx, req)
 	if err != nil {
 		t.Fatalf("grant admin unique gift: %v", err)
+	}
+	if granted.Unique.ReleasedBy != entry.Gift.ReleasedBy {
+		t.Fatalf("admin grant issuer = %+v, want %+v", granted.Unique.ReleasedBy, entry.Gift.ReleasedBy)
 	}
 	action := granted.Send.RecipientMessage.Media.ServiceAction.StarGiftUnique
 	if granted.Duplicate || granted.Saved.MsgID <= 0 || granted.Saved.MsgID != granted.Saved.UpgradeMsgID ||

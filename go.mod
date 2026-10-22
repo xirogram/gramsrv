@@ -12,7 +12,7 @@ require (
 	github.com/golang-migrate/migrate/v4 v4.19.1
 	github.com/gotd/ige v0.3.0
 	github.com/gotd/log/logzap v0.1.1
-	github.com/iamxvbaba/td v1.4.1
+	github.com/iamxvbaba/td v1.5.0
 	github.com/jackc/pgerrcode v0.0.0-20220416144525-469b46aa5efa
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/klauspost/compress v1.19.1
@@ -42,6 +42,7 @@ require (
 	golang.org/x/sync v0.23.0
 	golang.org/x/sys v0.48.0
 	golang.org/x/text v0.42.0
+	rsc.io/qr v0.2.0
 )
 
 require (
@@ -132,5 +133,4 @@ require (
 	google.golang.org/protobuf v1.36.12 // indirect
 	gopkg.in/ini.v1 v1.67.2 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
-	rsc.io/qr v0.2.0 // indirect
 )

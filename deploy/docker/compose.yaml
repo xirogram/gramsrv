@@ -126,6 +126,9 @@ services:
       TELESRV_OTP_WEBHOOK_TIMEOUT: ${TELESRV_OTP_WEBHOOK_TIMEOUT:-5s}
       TELESRV_RSA_KEY: /var/lib/telesrv/server_rsa.pem
       TELESRV_DONATION_WALLET_KEY_PATH: /var/lib/telesrv/donation_wallet.key
+      # Opt in with /var/lib/telesrv/wallet; the state must remain on this volume.
+      TELESRV_WALLET_STATE_DIR: ${TELESRV_WALLET_STATE_DIR-}
+      TELESRV_WALLET_KEY_FILE: ${TELESRV_WALLET_KEY_FILE:-/var/lib/telesrv/wallet/keys.key}
       TELESRV_RSA_IDENTITY_MODE: ${TELESRV_RSA_IDENTITY_MODE:-test}
       TELESRV_SFU_ENABLE: ${TELESRV_SFU_ENABLE:-true}
       TELESRV_SFU_UDP_PORT: ${TELESRV_SFU_UDP_PORT:-12399}

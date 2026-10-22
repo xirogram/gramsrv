@@ -108,6 +108,8 @@ type ChannelStore interface {
 	// SendMonoforumMessage 向频道私信(monoforum)发消息,按 saved_peer 分订阅者子会话;不要求成员身份。
 	SendMonoforumMessage(ctx context.Context, req domain.SendMonoforumMessageRequest) (domain.SendChannelMessageResult, error)
 	EditChannelMessage(ctx context.Context, req domain.EditChannelMessageRequest) (domain.EditChannelMessageResult, error)
+	// EditFactCheck 写入或删除消息上的 Layer 231 事实核查标签；空文本表示删除。
+	EditFactCheck(ctx context.Context, req domain.EditFactCheckRequest) (domain.EditFactCheckResult, error)
 	DeleteChannelMessages(ctx context.Context, req domain.DeleteChannelMessagesRequest) (domain.DeleteChannelMessagesResult, error)
 	DeleteChannelHistory(ctx context.Context, req domain.DeleteChannelHistoryRequest) (domain.DeleteChannelHistoryResult, error)
 	DeleteChannelParticipantHistory(ctx context.Context, req domain.DeleteChannelParticipantHistoryRequest) (domain.DeleteChannelHistoryResult, error)

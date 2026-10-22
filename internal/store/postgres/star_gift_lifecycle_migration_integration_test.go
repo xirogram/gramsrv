@@ -116,6 +116,7 @@ func TestEmbeddedMigrationsAreContiguousAndReversible(t *testing.T) {
 			20261014040000: 20261014030000,
 			20261015010000: 20261014040000,
 			20261016010000: 20261015010000,
+			20261017010000: 20261016010000,
 		}
 		if expected, ok := timestampPredecessors[version]; ok {
 			if previous != expected {

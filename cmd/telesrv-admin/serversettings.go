@@ -117,6 +117,28 @@ func (s *server) handleServerIconAPI(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(data)
 }
 
+// handlePublicServerIconAPI serves the brand mark to the unauthenticated login
+// screen. See the route comment in server.go for why this one is public and
+// what it is allowed to disclose. It shares the Content-Type table with the
+// gated variant so the login page gets the same bytes either way.
+func (s *server) handlePublicServerIconAPI(w http.ResponseWriter, _ *http.Request) {
+	data, ext, ok := s.identity.Icon()
+	if !ok {
+		writeAPIError(w, http.StatusNotFound, "no icon configured")
+		return
+	}
+	contentType := map[string]string{
+		".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+		".webp": "image/webp", ".gif": "image/gif",
+	}[ext]
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(data)
+}
+
 type setServerIdentityAPIRequest struct {
 	CommandID   string `json:"command_id"`
 	Reason      string `json:"reason"`

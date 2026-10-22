@@ -1,35 +1,9 @@
-import {
-  AtSign,
-  BellRing,
-  BadgeCheck,
-  BarChart3,
-  Bot,
-  ChevronsLeft,
-  ChevronsRight,
-  Database,
-  LayoutDashboard,
-  LogOut,
-  MessageSquareText,
-  Megaphone,
-  BadgeDollarSign,
-  Star,
-  Wallet,
-  ShieldAlert,
-  ShieldCheck,
-  Trophy,
-  Users,
-  UserCog,
-  UserRound,
-  Gift,
-  ScrollText,
-  Settings,
-  Smile,
-  Tag
-} from "lucide-react";
+import { ChevronsLeft, ChevronsRight, LogOut, UserRound } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { api } from "../api";
 import { LanguageSwitch, useI18n } from "../i18n";
-import { permissionAuditRead, permissionAdminsManage, permissionNotifications, permissionBotVerificationReview, permissionDashboardRead, permissionDonationsManage, permissionMessagesRead, permissionPremiumManage, permissionPricesManage, permissionServerManage, permissionStarsRead, permissionVerificationReview, useCan } from "../permissions";
+import { navSections, sectionActive, visibleTabs } from "../nav";
+import { usePermissions } from "../permissions";
 import { type Navigate, type RouteState, routeSubtitle, routeTitle } from "../routing";
 import { ThemeSwitch } from "../theme";
 import { AppLink } from "./AppLink";
@@ -65,26 +39,7 @@ export function Shell({
   children: ReactNode;
 }) {
   const { t } = useI18n();
-  // The verification queue is hidden for a session without verification.review:
-  // the entry would only lead to a 403 (and the route itself is gated as well).
-  const canReviewVerification = useCan(permissionVerificationReview);
-  const canManageDonations = useCan(permissionDonationsManage);
-  // Same reasoning for the third-party queue, which has its own right: the two
-  // sections are granted independently, so one entry can be visible without the other.
-  const canReviewBotVerification = useCan(permissionBotVerificationReview);
-  const canManagePremium = useCan(permissionPremiumManage);
-  // The console's own administration and its action trail are granted separately
-  // from every working section: managing operators (admins.manage) or reading
-  // what everyone has done (audit.read) deserves an explicit decision, so the
-  // entries below are not even visible without the matching right.
-  const canManageAdmins = useCan(permissionAdminsManage);
-  const canReadDashboard = useCan(permissionDashboardRead);
-  const canReadAudit = useCan(permissionAuditRead);
-  const canSendNotifications = useCan(permissionNotifications);
-  const canManageServer = useCan(permissionServerManage);
-  const canReadStars = useCan(permissionStarsRead);
-  const canManagePrices = useCan(permissionPricesManage);
-  const canReadMessages = useCan(permissionMessagesRead);
+  const { can } = usePermissions();
 
   // Server identity (name/icon) is admin-editable per Server Settings ->
   // Server identity, and takes over the sidebar branding when set -- the
@@ -94,7 +49,7 @@ export function Shell({
   // without that permission just gets the default branding.
   const [identity, setIdentity] = useState<{ name: string; iconExt?: string } | null>(null);
   useEffect(() => {
-    if (!canManageServer) return;
+    if (!can("server.manage")) return;
     const load = () => {
       api.serverIdentity()
         .then((info) => setIdentity({ name: info.name, iconExt: info.icon_ext }))
@@ -105,7 +60,7 @@ export function Shell({
     // sidebar and tab rebrand without a full page reload.
     window.addEventListener("telesrv:identity-changed", load);
     return () => window.removeEventListener("telesrv:identity-changed", load);
-  }, [canManageServer]);
+  }, [can]);
   const [brandIconFailed, setBrandIconFailed] = useState(false);
   const brandName = identity?.name?.trim() || "telesrv";
   const brandIconSrc = identity?.iconExt && !brandIconFailed ? api.serverIconURL() : "/logo.png";
@@ -125,16 +80,19 @@ export function Shell({
     }
     const linkEl = link;
     const src = identity?.iconExt && !brandIconFailed ? api.serverIconURL() : "/logo.png";
-    // Browsers render the favicon file as-is -- they don't apply the
-    // sidebar's CSS border-radius to it, so a square-cornered source image
-    // shows up square in the tab strip. Bake the circular mask into the
-    // actual pixels instead, the same way an app icon export would.
+    // Browsers render the favicon file as-is -- they don't apply the sidebar's
+    // border-radius to it -- so a square upload used to show square in the tab
+    // strip while the sidebar showed the same file as a circle. Bake the same
+    // rounded-square mask into the actual pixels so the tab matches the app.
     let cancelled = false;
     const img = new Image();
     img.crossOrigin = "anonymous";
     img.onload = () => {
       if (cancelled) return;
       const size = 64;
+      // 30% matches --radius of the .brand-mark in 01-foundation.css, so the
+      // tab strip and the sidebar show the same silhouette.
+      const radius = size * 0.3;
       const canvas = document.createElement("canvas");
       canvas.width = size;
       canvas.height = size;
@@ -145,7 +103,17 @@ export function Shell({
       }
       ctx.save();
       ctx.beginPath();
-      ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+      // roundRect is not in every browser this panel supports, so the path is
+      // built from four arcs and two lines by hand.
+      ctx.moveTo(radius, 0);
+      ctx.lineTo(size - radius, 0);
+      ctx.arcTo(size, 0, size, radius, radius);
+      ctx.lineTo(size, size - radius);
+      ctx.arcTo(size, size, size - radius, size, radius);
+      ctx.lineTo(radius, size);
+      ctx.arcTo(0, size, 0, size - radius, radius);
+      ctx.lineTo(0, radius);
+      ctx.arcTo(0, 0, radius, 0, radius);
       ctx.closePath();
       ctx.clip();
       ctx.drawImage(img, 0, 0, size, size);
@@ -186,97 +154,28 @@ export function Shell({
         </AppLink>
         <div className="sidebar-label">{t("layout.navigation")}</div>
         <nav className="nav-list" aria-label={t("layout.primaryNav")}>
-          <NavLink icon={<LayoutDashboard size={16} />} href="/" route={route} navigate={navigate}>{t("layout.dashboard")}</NavLink>
-          {canReadDashboard && (
-            <NavLink icon={<BarChart3 size={16} />} href="/statistics" route={route} navigate={navigate}>{t("layout.statistics")}</NavLink>
-          )}
-          <NavLink icon={<Users size={16} />} href="/accounts" route={route} navigate={navigate}>{t("layout.accounts")}</NavLink>
-          <NavLink icon={<Trophy size={16} />} href="/account-ratings" route={route} navigate={navigate}>{t("layout.accountRatings")}</NavLink>
-          <NavLink icon={<ShieldCheck size={16} />} href="/channels" route={route} navigate={navigate}>{t("layout.channels")}</NavLink>
-          <NavLink icon={<Bot size={16} />} href="/bots" route={route} navigate={navigate}>{t("layout.bots")}</NavLink>
-          {canReadStars && (
-            <NavLink icon={<Star size={16} />} href="/stars" route={route} navigate={navigate}>{t("layout.stars")}</NavLink>
-          )}
-          {canManagePrices && (
-            <NavLink icon={<Tag size={16} />} href="/prices" route={route} navigate={navigate}>{t("layout.prices")}</NavLink>
-          )}
-          <NavLink
-            icon={<Gift size={16} />}
-            href="/gifts"
-            route={route}
-            navigate={navigate}
-            activeWhen={(path) => path.startsWith("/gifts") || path.startsWith("/auctions")}
-          >
-            {t("layout.gifts")}
-          </NavLink>
-          <NavLink
-            icon={<BadgeDollarSign size={16} />}
-            href={canManagePremium ? "/monetization" : "/give-gifts"}
-            route={route}
-            navigate={navigate}
-            activeWhen={(path) => path.startsWith("/monetization") || path.startsWith("/premium") || path.startsWith("/give-gifts") || path.startsWith("/star-issue")}
-          >
-            {t("layout.grants")}
-          </NavLink>
-          {canManageDonations && (
-            <NavLink icon={<Wallet size={16} />} href="/donations" route={route} navigate={navigate}>{t("layout.donations")}</NavLink>
-          )}
-          <NavLink
-            icon={<AtSign size={16} />}
-            href="/collectible-usernames"
-            route={route}
-            navigate={navigate}
-            activeWhen={(path) => path.startsWith("/collectible-usernames") || path.startsWith("/collectible-phones") || path.startsWith("/nft-gifts")}
-          >
-            {t("layout.nftItems")}
-          </NavLink>
-          {(canReviewVerification || canReviewBotVerification) && (
-            <NavLink
-              icon={<BadgeCheck size={16} />}
-              href={canReviewVerification ? "/verification" : "/bot-verification"}
-              route={route}
-              navigate={navigate}
-              activeWhen={(path) => path.startsWith("/verification") || path.startsWith("/bot-verification")}
-            >
-              {t("layout.verification")}
-            </NavLink>
-          )}
-          <NavLink
-            icon={<Smile size={16} />}
-            href="/stickers"
-            route={route}
-            navigate={navigate}
-            activeWhen={(path) => path.startsWith("/stickers") || path.startsWith("/emoji") || path.startsWith("/gif-catalog")}
-          >
-            {t("layout.media")}
-          </NavLink>
-          <NavLink icon={<Database size={16} />} href="/storage" route={route} navigate={navigate}>{t("layout.storage")}</NavLink>
-          <NavLink icon={<Megaphone size={16} />} href="/broadcasts" route={route} navigate={navigate}>{t("layout.broadcasts")}</NavLink>
-          {canReadMessages && (
-            <NavLink
-              icon={<MessageSquareText size={16} />}
-              href="/messages/private"
-              route={route}
-              navigate={navigate}
-              activeWhen={(path) => path.startsWith("/messages")}
-            >
-              {t("layout.messages")}
-            </NavLink>
-          )}
-          <NavLink icon={<ShieldAlert size={16} />} href="/moderation" route={route} navigate={navigate}>{t("layout.moderation")}</NavLink>
-          {canReadAudit && (
-            <NavLink icon={<ScrollText size={16} />} href="/audit-log" route={route} navigate={navigate}>{t("layout.auditLog")}</NavLink>
-          )}
-          {canSendNotifications && (
-            <NavLink icon={<BellRing size={16} />} href="/notifications" route={route} navigate={navigate}>{t("layout.notifications")}</NavLink>
-          )}
-          {canManageAdmins && (
-            <NavLink icon={<UserCog size={16} />} href="/admin-users" route={route} navigate={navigate}>{t("layout.adminUsers")}</NavLink>
-          )}
-
-          {canManageServer && (
-            <NavLink icon={<Settings size={16} />} href="/server-settings" route={route} navigate={navigate}>{t("layout.serverSettings")}</NavLink>
-          )}
+          {navSections.map((section) => {
+            const tabs = visibleTabs(section, can);
+            // A section the session holds none of the rights for is not shown:
+            // every one of its routes is gated, so the row could only lead to a
+            // denial screen. A section with exactly one visible tab still gets a
+            // row -- that is the section's whole reason to exist.
+            if (tabs.length === 0) {
+              return null;
+            }
+            const Icon = section.icon;
+            return (
+              <NavLink
+                key={section.id}
+                icon={<Icon size={16} />}
+                href={tabs[0].path}
+                navigate={navigate}
+                active={sectionActive(section, route.path, can)}
+              >
+                {t(section.labelKey)}
+              </NavLink>
+            );
+          })}
         </nav>
         <div className="sidebar-toggle-wrap">
           <button
@@ -316,23 +215,23 @@ export function Shell({
 
 function NavLink({
   href,
-  route,
   navigate,
   icon,
   children,
-  activeWhen
+  active
 }: {
   href: string;
-  route: RouteState;
   navigate: Navigate;
   icon?: ReactNode;
   children: ReactNode;
-  activeWhen?: (path: string) => boolean;
+  // Computed by the caller from the nav table, which knows every sibling route
+  // of the section. A section's row lights up on its detail pages too, so the
+  // operator keeps their bearings inside /accounts/42.
+  active: boolean;
 }) {
-  const active = activeWhen ? activeWhen(route.path) : href === "/" ? route.path === "/" : route.path.startsWith(href);
   return (
     <AppLink className={`nav-item ${active ? "active" : ""}`} href={href} navigate={navigate}>
-      {icon ?? <span aria-hidden="true" className="nav-dot" />}
+      {icon}
       <span>{children}</span>
     </AppLink>
   );

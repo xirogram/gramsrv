@@ -2,21 +2,20 @@ import { Loader2, RefreshCw, Tag } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, errorMessage } from "../api";
 import { ActionButton } from "../components/ActionButton";
+import { SectionTabs } from "../components/SectionTabs";
 import { Alert, Badge, EmptyRow, PageFrame } from "../components/ui";
+import { useI18n } from "../i18n";
+import { formatQuantity } from "../lib/format";
+import type { Navigate } from "../routing";
 import type { ItemPrice } from "../types";
 
 type PriceDraft = {
   starsPrice: string;
   bid: string;
-  enabled: boolean;
 };
 
 function draftFromPrice(price: ItemPrice): PriceDraft {
-  return {
-    starsPrice: String(price.stars_price),
-    bid: String(price.bid),
-    enabled: price.enabled
-  };
+  return { starsPrice: String(price.stars_price), bid: String(price.bid) };
 }
 
 function draftValid(draft: PriceDraft): boolean {
@@ -26,12 +25,18 @@ function draftValid(draft: PriceDraft): boolean {
     && Number.isInteger(bid) && bid >= 0;
 }
 
+function draftDirty(draft: PriceDraft, row: ItemPrice): boolean {
+  return draft.starsPrice !== String(row.stars_price) || draft.bid !== String(row.bid);
+}
+
 // Shop pricing: the effective price of every catalog product (stored overrides
-// merged over the defaults), the per-product kill switch, and the stars rate
-// the bot multiplies Telegram Star purchases by. Every save runs the console's
-// standard reason -> dry-run -> confirm flow through admin.Service.
-export function PricesPage() {
+// merged over the bot's catalog defaults), the per-product kill switch, and the
+// Stars rate a purchase is billed at. Every save runs the console's standard
+// reason -> dry-run -> confirm flow through admin.Service.
+export function PricesPage({ navigate }: { navigate: Navigate }) {
+  const { t } = useI18n();
   const [rows, setRows] = useState<ItemPrice[]>([]);
+  const [packages, setPackages] = useState<number[]>([]);
   const [rate, setRate] = useState("");
   const [drafts, setDrafts] = useState<Record<string, PriceDraft>>({});
   const [busy, setBusy] = useState(false);
@@ -43,6 +48,7 @@ export function PricesPage() {
     try {
       const resp = await api.itemPrices();
       setRows(resp.rows);
+      setPackages(resp.star_packages ?? []);
       setRate(resp.stars_rate > 0 ? String(resp.stars_rate) : "");
       setDrafts(Object.fromEntries(resp.rows.map((row) => [row.product_code, draftFromPrice(row)])));
     } catch (err) {
@@ -63,33 +69,36 @@ export function PricesPage() {
 
   const rateValue = Number(rate);
   const rateValid = rate !== "" && Number.isInteger(rateValue) && rateValue > 0 && rateValue <= 1_000_000;
+  const liveRate = Number.isInteger(rateValue) && rateValue > 0 ? rateValue : 0;
 
   return (
     <PageFrame
-      title={"Shop prices"}
-      eyebrow={"Product prices, availability and the Stars rate the bot bills purchases at"}
+      title={t("prices.title")}
+      eyebrow={t("prices.eyebrow")}
       actions={
-        <button className="btn" type="button" onClick={() => void load()} disabled={busy}>
-          {busy ? <Loader2 size={15} className="spin" /> : <RefreshCw size={15} />} {"Refresh"}
+        <button className="btn icon-text" type="button" onClick={() => void load()} disabled={busy}>
+          <RefreshCw size={15} className={busy ? "spin" : undefined} /> {t("common.refresh")}
         </button>
       }
     >
+      <SectionTabs sectionId="commerce" active="/prices" navigate={navigate} />
       {error && <Alert>{error}</Alert>}
 
       <section className="section-block">
-        <h2>{"Stars rate"}</h2>
+        <h2>{t("prices.starsRate")}</h2>
         <div className="card-body">
           <div className="attr-block">
             <div className="result-line">
-              <span>{"FG Stars per 1 Telegram Star"}</span>
+              <span>{t("prices.starsPerStar")}</span>
               <strong>
                 <input
+                  aria-label={t("prices.starsPerStar")}
                   type="number"
                   min="1"
                   max="1000000"
                   className="small-input"
                   value={rate}
-                  placeholder={"e.g. 100"}
+                  placeholder="100"
                   onChange={(event) => setRate(event.target.value)}
                 />
               </strong>
@@ -99,42 +108,64 @@ export function PricesPage() {
             <ActionButton
               compact
               tone="neutral"
-              label={"Save rate"}
+              label={t("prices.saveRate")}
               path="/api/actions/item-price-set-rate"
               payload={() => ({ stars_rate: rateValue })}
               disabled={!rateValid}
               onDone={() => void load()}
             />
           </div>
+          {packages.length > 0 && (
+            <>
+              <div className="prices-packages">
+                <div className="prices-packages-head">{t("prices.packagesHint")}</div>
+                <div className="prices-packages-list">
+                  {packages.map((size) => (
+                    <div key={size} className="prices-package">
+                      <strong>{formatQuantity(String(size))}</strong>
+                      <span>{t("prices.telegramStars")}</span>
+                      <span className="muted">
+                        {liveRate > 0
+                          ? t("prices.packageCredits", { amount: formatQuantity(String(size * liveRate)) })
+                          : t("prices.packageUnset")}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <p className="muted prices-note">
+                <Tag size={13} /> {t("prices.packagesNote")}
+              </p>
+            </>
+          )}
         </div>
       </section>
 
       <section className="section-block">
-        <h2>{"Products"}</h2>
+        <h2>{t("prices.products")}</h2>
         <div className="table-wrap">
           <table className="data-table">
             <thead>
               <tr>
-                <th>{"Product"}</th>
-                <th>{"Price (stars)"}</th>
-                <th>{"Bid (TON)"}</th>
-                <th>{"State"}</th>
-                <th>{"Changed"}</th>
-                <th>{"Actions"}</th>
+                <th>{t("prices.product")}</th>
+                <th>{t("prices.priceStars")}</th>
+                <th>{t("prices.bidTon")}</th>
+                <th>{t("common.status")}</th>
+                <th>{t("prices.changed")}</th>
+                <th>{t("common.actions")}</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((row) => {
                 const draft = drafts[row.product_code] ?? draftFromPrice(row);
                 const valid = draftValid(draft);
-                const dirty = draft.starsPrice !== String(row.stars_price)
-                  || draft.bid !== String(row.bid)
-                  || draft.enabled !== row.enabled;
+                const dirty = draftDirty(draft, row);
                 return (
                   <tr key={row.product_code}>
                     <td>{row.title || row.product_code}<div className="muted mono">{row.product_code}</div></td>
                     <td>
                       <input
+                        aria-label={t("prices.priceStars")}
                         type="number"
                         min="0"
                         max="1000000"
@@ -145,6 +176,7 @@ export function PricesPage() {
                     </td>
                     <td>
                       <input
+                        aria-label={t("prices.bidTon")}
                         type="number"
                         min="0"
                         className="small-input"
@@ -152,40 +184,45 @@ export function PricesPage() {
                         onChange={(event) => updateDraft(row.product_code, { bid: event.target.value })}
                       />
                     </td>
-                    <td>{row.enabled ? <Badge tone="good">{"Enabled"}</Badge> : <Badge tone="danger">{"Hidden"}</Badge>}</td>
+                    <td>{row.enabled ? <Badge tone="good">{t("common.enabled")}</Badge> : <Badge tone="danger">{t("prices.hidden")}</Badge>}</td>
                     <td className="muted">
                       {row.updated_by
                         ? <>{row.updated_by}{row.updated_at ? ` · ${new Date(row.updated_at * 1000).toLocaleString()}` : ""}</>
-                        : <span>{"catalog default"}</span>}
+                        : <span>{t("prices.catalogDefault")}</span>}
                     </td>
                     <td>
                       <div className="gift-table-actions">
                         <ActionButton
                           compact
                           tone="neutral"
-                          label={"Save"}
+                          label={t("common.save")}
                           path="/api/actions/item-price-update"
                           payload={() => ({
                             product_code: row.product_code,
                             stars_price: Number(draft.starsPrice),
                             bid: Number(draft.bid),
-                            enabled: draft.enabled
+                            enabled: row.enabled
                           })}
                           disabled={!valid || !dirty}
                           onDone={() => void load()}
                         />
+                        {/* The kill switch carries the stored price, not the
+                            draft. It used to send Number(draft.starsPrice) and
+                            Number(draft.bid), so an operator who typed a new
+                            price and then hit Hide published the new price as
+                            a side effect of hiding the product -- and a
+                            half-typed value ("12" of "129") went out with it. */}
                         <ActionButton
                           compact
                           tone={row.enabled ? "danger" : "neutral"}
-                          label={row.enabled ? "Hide" : "Show"}
+                          label={row.enabled ? t("prices.hide") : t("prices.show")}
                           path="/api/actions/item-price-update"
                           payload={() => ({
                             product_code: row.product_code,
-                            stars_price: Number(draft.starsPrice),
-                            bid: Number(draft.bid),
+                            stars_price: row.stars_price,
+                            bid: row.bid,
                             enabled: !row.enabled
                           })}
-                          disabled={!valid}
                           onDone={() => void load()}
                         />
                       </div>
@@ -197,9 +234,7 @@ export function PricesPage() {
             </tbody>
           </table>
         </div>
-        <p className="muted">
-          <Tag size={13} /> {"Hidden products disappear from the bot's shop within a minute. The rate applies to FlashGram Stars purchases."}
-        </p>
+        <p className="muted">{t("prices.hiddenNote")}</p>
       </section>
     </PageFrame>
   );

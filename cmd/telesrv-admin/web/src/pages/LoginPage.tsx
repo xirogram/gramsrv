@@ -1,5 +1,5 @@
 import type { FormEvent } from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, errorMessage } from "../api";
 import { Alert } from "../components/ui";
 import { AppBackground } from "../components/AppBackground";
@@ -13,6 +13,18 @@ export function LoginPage({ onLogin }: { onLogin: (session: AdminSession) => voi
   const [secret, setSecret] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  // The operator's own icon, fetched from the public route so the login screen
+  // shows the same mark the sidebar does instead of the bundled reference
+  // logo. A 404 (nothing configured) is the expected case, not an error worth
+  // showing anyone, so it just leaves the fallback in place.
+  const [brandIcon, setBrandIcon] = useState("/logo.png");
+
+  useEffect(() => {
+    const probe = new Image();
+    probe.onload = () => setBrandIcon(api.publicServerIconURL());
+    probe.onerror = () => undefined;
+    probe.src = api.publicServerIconURL();
+  }, []);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -36,7 +48,7 @@ export function LoginPage({ onLogin }: { onLogin: (session: AdminSession) => voi
       <section className="login-panel">
         <div className="login-head">
           <div className="brand brand-elevated">
-            <span className="brand-mark"><img src="/logo.png" alt="" /></span>
+            <span className="brand-mark"><img src={brandIcon} alt="" /></span>
             <span>
               <strong>telesrv</strong>
               <small>{t("app.adminConsole")}</small>

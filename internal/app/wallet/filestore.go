@@ -3,6 +3,8 @@ package wallet
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -11,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,7 +26,9 @@ var ErrWalletStore = errors.New("wallet state storage unavailable")
 // FileStore is single-writer, durable wallet storage independent of PostgreSQL.
 // A process lock prevents two server instances from racing over the same files.
 // Per-user state changes use fsync + atomic rename, including challenge use and
-// wallet replacement in the same record. No private wallet keys are stored.
+// wallet replacement in the same record. Keys telesrv generated itself are
+// stored only sealed under the wallet master key; imported wallets never have
+// private key material here.
 type FileStore struct {
 	mu     sync.Mutex
 	dir    string
@@ -34,13 +39,25 @@ type FileStore struct {
 type storedChallenge struct {
 	Challenge   domain.WalletChallenge `json:"challenge"`
 	Consumed    bool                   `json:"consumed"`
+	Operation   string                 `json:"operation,omitempty"`
 	RequestHash []byte                 `json:"request_hash,omitempty"`
 }
 
 type walletRecord struct {
 	Version    int                        `json:"version"`
 	Link       *domain.WalletLink         `json:"link,omitempty"`
+	Key        *StoredWalletKey           `json:"key,omitempty"`
 	Challenges map[string]storedChallenge `json:"challenges"`
+}
+
+// StoredWalletKey is telesrv's custody of a wallet it generated itself. Only
+// the sealed private key and its nonce are persisted; the plaintext key exists
+// in memory for the lifetime of the request and is never logged.
+type StoredWalletKey struct {
+	Ciphertext string    `json:"ciphertext"`
+	Nonce      string    `json:"nonce"`
+	CreatedAt  time.Time `json:"created_at"`
+	Origin     string    `json:"origin"`
 }
 
 func NewFileStore(dir string) (*FileStore, error) {
@@ -205,7 +222,7 @@ func (s *FileStore) CommitWalletLink(ctx context.Context, c domain.WalletChallen
 		return domain.ErrWalletProofInvalid
 	}
 	if stored.Consumed {
-		if !bytes.Equal(stored.RequestHash, hash[:]) || record.Link == nil || !bytes.Equal(record.Link.PublicKey, link.PublicKey) {
+		if stored.Operation != "import" || !bytes.Equal(stored.RequestHash, hash[:]) || record.Link == nil || !bytes.Equal(record.Link.PublicKey, link.PublicKey) {
 			return domain.ErrWalletProofInvalid
 		}
 		return nil
@@ -215,10 +232,67 @@ func (s *FileStore) CommitWalletLink(ctx context.Context, c domain.WalletChallen
 	}
 	stored.Consumed = true
 	stored.RequestHash = bytes.Clone(hash[:])
+	stored.Operation = "import"
 	record.Challenges[key] = stored
 	link.PublicKey = bytes.Clone(link.PublicKey)
 	record.Link = &link
+	record.Key = nil
 	return s.write(c.UserID, record)
+}
+
+// CommitWalletCreated persists a telesrv-generated wallet together with its
+// sealed private key.
+//
+// Creation has no client-side secret to prove, so the ownership challenge only
+// binds the operation to this authorization and makes a retry safe: when the
+// challenge was already consumed by a creation, the stored link is returned and
+// reused=true, and the freshly generated key material is discarded unwritten.
+// The balance is deliberately NOT persisted here; a failing balance lookup must
+// never leave a half-applied binding behind.
+func (s *FileStore) CommitWalletCreated(
+	ctx context.Context,
+	c domain.WalletChallenge,
+	link domain.WalletLink,
+	key *StoredWalletKey,
+	allowReplacement bool,
+	now time.Time,
+) (domain.WalletLink, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return domain.WalletLink{}, false, err
+	}
+	if c.UserID != link.UserID || len(link.PublicKey) != 32 || link.Address == "" || key == nil || key.Ciphertext == "" || key.Nonce == "" {
+		return domain.WalletLink{}, false, domain.ErrWalletProofInvalid
+	}
+	record, err := s.read(c.UserID)
+	if err != nil {
+		return domain.WalletLink{}, false, err
+	}
+	key8 := hex.EncodeToString(c.AuthKeyID[:])
+	stored, found := record.Challenges[key8]
+	if !found || stored.Challenge.Payload != c.Payload || stored.Challenge.Domain != c.Domain || !now.Before(stored.Challenge.ExpiresAt) {
+		return domain.WalletLink{}, false, domain.ErrWalletProofInvalid
+	}
+	if stored.Consumed {
+		// Retry of a committed creation: answer with the wallet that won, and
+		// never with the discarded candidate.
+		if stored.Operation != "create" || record.Link == nil || record.Key == nil || !bytes.Equal(stored.RequestHash, record.Link.PublicKey) {
+			return domain.WalletLink{}, false, domain.ErrWalletProofInvalid
+		}
+		return *record.Link, true, nil
+	}
+	if record.Link != nil && !allowReplacement && !bytes.Equal(record.Link.PublicKey, link.PublicKey) {
+		return domain.WalletLink{}, false, domain.ErrWalletPasswordRequired
+	}
+	stored.Consumed = true
+	stored.RequestHash = bytes.Clone(link.PublicKey)
+	stored.Operation = "create"
+	record.Challenges[key8] = stored
+	link.PublicKey = bytes.Clone(link.PublicKey)
+	record.Link = &link
+	record.Key = key
+	return link, false, s.write(c.UserID, record)
 }
 
 func (s *FileStore) WalletLinks(ctx context.Context, ids []int64) ([]domain.WalletLink, error) {
@@ -243,4 +317,62 @@ func (s *FileStore) WalletLinks(ctx context.Context, ids []int64) ([]domain.Wall
 		}
 	}
 	return result, nil
+}
+
+// ValidateKeyCipher fails startup if persisted custody keys cannot be opened by
+// the configured master key. It also binds each secret to its stored public key.
+func (s *FileStore) ValidateKeyCipher(keys *KeyCipher) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	dir, err := os.Open(s.dir)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	for {
+		entries, err := dir.ReadDir(128)
+		if err != nil && err != io.EOF {
+			return err
+		}
+		for _, entry := range entries {
+			name := entry.Name()
+			if !strings.HasSuffix(name, ".json") {
+				continue
+			}
+			id, parseErr := strconv.ParseInt(strings.TrimSuffix(name, ".json"), 10, 64)
+			if parseErr != nil || entry.IsDir() {
+				return ErrWalletStore
+			}
+			record, readErr := s.read(id)
+			if readErr != nil {
+				return readErr
+			}
+			if record.Key == nil {
+				continue
+			}
+			if record.Link == nil {
+				return ErrWalletStore
+			}
+			ciphertext, e := base64.RawStdEncoding.DecodeString(record.Key.Ciphertext)
+			if e != nil {
+				return ErrWalletStore
+			}
+			nonce, e := base64.RawStdEncoding.DecodeString(record.Key.Nonce)
+			if e != nil {
+				return ErrWalletStore
+			}
+			private, e := keys.Open(ciphertext, nonce)
+			if e != nil {
+				return ErrWalletKeyFile
+			}
+			valid := len(private) == ed25519.PrivateKeySize && bytes.Equal(ed25519.PrivateKey(private).Public().(ed25519.PublicKey), record.Link.PublicKey)
+			clear(private)
+			if !valid {
+				return ErrWalletKeyFile
+			}
+		}
+		if err == io.EOF {
+			return nil
+		}
+	}
 }

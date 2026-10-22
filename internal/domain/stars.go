@@ -263,6 +263,9 @@ type StarsTransactionPage struct {
 	Users        []User // History 中提到的对手方用户，供 tg Users 富化
 }
 
+// TonUSDRate is the fixed local-ledger USD reference rate, not a live market quote.
+const TonUSDRate = 1.3448279670684584
+
 // TonTransaction is an entry in telesrv's internal nanoton ledger. It models
 // the Telegram TON-denominated gift UI without contacting a wallet, Fragment,
 // a TON node, or any blockchain service.

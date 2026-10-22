@@ -1,11 +1,15 @@
 name: CI
 
 on:
+  # Every branch push runs CI, not just the release branches. A feature branch
+  # that never gets a run is a branch whose breakage is invisible until someone
+  # opens a PR and waits; catching it at push time is the whole point of having
+  # the workflow. Tags are excluded because they are not branch state.
   push:
     branches:
-      - main
-      - grammy
-      - admin
+      - "**"
+    tags-ignore:
+      - "**"
   pull_request:
   workflow_dispatch:
   workflow_call:
@@ -67,6 +71,11 @@ jobs:
           TELESRV_TEST_POSTGRES_DSN: postgres://inventory:inventory-test@127.0.0.1:5432/gift_inventory_test?sslmode=disable
         run: go test ./cmd/telesrv-admin -run '^(TestOperatorCommand|TestOperatorCreateRoute|TestOperatorUniqueness|TestNamedOperator|TestDemotion|TestAuditTrail)' -count=1 -timeout=5m
 
+      - name: Verify fact-check persistence and visibility against PostgreSQL
+        env:
+          TELESRV_TEST_POSTGRES_DSN: postgres://inventory:inventory-test@127.0.0.1:5432/gift_inventory_test?sslmode=disable
+        run: go test ./internal/store/postgres -run '^TestChannelFactCheck' -count=1 -timeout=3m
+
   admin-web:
     name: Admin web build
     runs-on: ubuntu-24.04
@@ -90,6 +99,15 @@ jobs:
       - name: Build
         working-directory: cmd/telesrv-admin/web
         run: npm run build
+
+      - name: Check the generated API-doc tables
+        # docs/admin-panel-api.{en,ru}.md carry route and permission tables
+        # generated from nav.ts / permissions.tsx / security.go. They drifted
+        # badly once because nothing compared them to the source, so the check
+        # is the whole point: it fails when a page or a right is added and the
+        # docs are not regenerated with
+        #   python3 scripts/gen_admin_panel_doc_tables.py --write
+        run: python3 scripts/gen_admin_panel_doc_tables.py --check
 
   grammystore:
     name: Grammy store bot
@@ -164,7 +182,11 @@ jobs:
           compose=(docker compose -p telesrv-main-ci --project-directory deploy/docker --env-file deploy/docker/.env -f deploy/docker/compose.yaml)
           bridge=("${compose[@]}" -f deploy/docker/compose.bridge-network.yaml)
           "${compose[@]}" config --quiet
-          "${compose[@]}" config --format json | python3 -c 'import json,sys; s=json.load(sys.stdin)["services"]; assert s["server"].get("network_mode") == "host"; assert s["admin"].get("network_mode") == "host"; assert len(s["server"].get("ports", [])) == 0; assert len(s["admin"].get("ports", [])) == 0; assert str(s["server"]["environment"]["TELESRV_TURN_RELAY_MAX_PORT"]) == "12999"'
+          # Every path telesrv writes to must live on the /var/lib/telesrv volume.
+          # The container rootfs is read_only, so a data path with a relative
+          # default that compose forgets to pin kills the server at startup --
+          # which is exactly how TELESRV_WALLET_STATE_DIR took the stack down once.
+          "${compose[@]}" config --format json | python3 -c 'import json,sys; s=json.load(sys.stdin)["services"]; assert s["server"].get("network_mode") == "host"; assert s["admin"].get("network_mode") == "host"; assert len(s["server"].get("ports", [])) == 0; assert len(s["admin"].get("ports", [])) == 0; assert str(s["server"]["environment"]["TELESRV_TURN_RELAY_MAX_PORT"]) == "12999"; _e = s["server"]["environment"]; assert not _e["TELESRV_WALLET_STATE_DIR"] or _e["TELESRV_WALLET_STATE_DIR"].startswith("/var/lib/telesrv/"); assert _e["TELESRV_WALLET_KEY_FILE"].startswith("/var/lib/telesrv")'
           "${bridge[@]}" config --quiet
           "${bridge[@]}" config --format json | python3 -c 'import json,sys; c=json.load(sys.stdin); s=c["services"]; assert s["server"].get("network_mode") != "host"; assert s["admin"].get("network_mode") != "host"; assert len(s["server"].get("ports", [])) == 69; assert len(s["admin"].get("ports", [])) == 1; assert "admin_host_access" in s["admin"]["networks"]; assert not c["networks"]["admin_host_access"].get("internal", False); assert str(s["server"]["environment"]["TELESRV_TURN_RELAY_MAX_PORT"]) == "12563"'
 
@@ -207,6 +229,12 @@ jobs:
             test "$(docker inspect --format '{{json .HostConfig.SecurityOpt}}' "$container_id")" = '["no-new-privileges:true"]'
             test "$(docker inspect --format '{{.HostConfig.NetworkMode}}' "$container_id")" = "host"
           done
+          # The wallet state directory holds per-account key material and
+          # NewFileStore refuses anything group- or world-accessible. Assert the
+          # mode on the mounted volume rather than trusting the image build: a
+          # permissive mode here is what stopped the server from booting.
+          server_container="$("${compose[@]}" ps --quiet server)"
+          test "$(docker exec "$server_container" stat -c %a /var/lib/telesrv/wallet)" = "700"
           curl --fail --silent --show-error http://127.0.0.1:2401/healthz | grep -qx ok
           curl --fail --silent --show-error http://127.0.0.1:2600/ >/dev/null
           timeout 5 bash -c 'exec 3<>/dev/tcp/127.0.0.1/2400'

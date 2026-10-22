@@ -32,6 +32,10 @@ logs/
 tmp/
 .gocache/
 .tdesktop-e2e/
+# Telegram 授权会话与 QR 登录产物（giftfetch -login-qr / appearancefetch /
+# giftfetch_telethon.py）。这些文件等价于账号凭据，任何情况下都不得入库。
+*.session
+*.session.qr.png
 
 # IDE
 .idea/
@@ -48,3 +52,8 @@ tmp/
 
 # Internal server deployment script (not part of the public repository)
 /scripts/install.sh
+
+# Local scratch files (not part of the repository)
+/gifts_catalog/
+/fix_docs.py
+/main.py

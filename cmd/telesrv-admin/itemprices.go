@@ -27,6 +27,12 @@ func (s *server) handleItemPricesAPI(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"rows":       domain.MergeItemPrices(domain.DefaultItemPrices, overrides, false),
 		"stars_rate": rate,
+		// The stars_N packages are computed by the bot from the rate rather
+		// than from a per-product row, so they are handed to the page as a
+		// separate read-only list. Without this the page showed only the
+		// products it could edit, and a Stars package -- the thing most
+		// buyers actually purchase -- was invisible.
+		"star_packages": domain.DefaultStarsPackageSizes,
 	})
 }
 
