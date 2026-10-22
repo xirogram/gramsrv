@@ -837,8 +837,8 @@ type StarGiftDeleteRequest struct {
 	Date   int
 }
 
-// StarGiftDeleteResult 报告删除结果。UniqueGiftID 非 0 表示这份礼物同时被
-// 升级成了藏品，藏品也一并作废（burned），不能再上架或导出。
+// StarGiftDeleteResult 报告删除结果。已升级成藏品（NFT）的礼物不可删除，
+// 所以 UniqueGiftID 恒为 0。
 type StarGiftDeleteResult struct {
 	SavedGiftID  int64
 	UniqueGiftID int64
@@ -1265,7 +1265,7 @@ var (
 	ErrStarGiftTransferUnavailable    = errors.New("stargift: transfer unavailable")
 	ErrStarGiftResaleUnavailable      = errors.New("stargift: resale unavailable")
 	// ErrStarGiftDeleteUnavailable 表示这份礼物当前不可删除：已转换、已导出、
-	// 正在出售、有待处理报价或已被删除。
+	// 已升级成藏品、正在出售、有待处理报价或已被删除。
 	ErrStarGiftDeleteUnavailable = errors.New("stargift: delete unavailable")
 	ErrStarGiftOfferInvalid      = errors.New("stargift: offer invalid")
 	ErrStarGiftOfferExpired      = errors.New("stargift: offer expired")

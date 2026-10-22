@@ -114,18 +114,18 @@ Bool`. The owner removes a received gift from the profile.
 - Only the caller may delete their own gift. A channel gift is a channel asset
   and is refused (`STARGIFT_OWNER_INVALID`); bots are refused
   (`BOT_METHOD_INVALID`).
+- Only a **plain** received gift can be deleted. A gift that was upgraded into
+  a collectible (NFT) is refused (`STARGIFT_INVALID`): destroying a
+  collectible is a different operation with its own financial rules, so this
+  method never burns one.
 - The gift row is **not** deleted: upgrade commands, offers and transfers
   reference it, so the delete is a lifecycle transition
   (`lifecycle_status='deleted'`, new state in migration
   `20261023000001_star_gift_deleted_state`). Read paths only project
   `lifecycle_status='active'`, so the gift leaves the profile, the account
   rating signal and the saved-gift lists immediately.
-- A gift that was upgraded into a collectible also burns that collectible
-  (`unique_star_gifts.burned`), so it can neither be listed for resale nor
-  exported to the chain afterwards.
 - Refused states (`STARGIFT_INVALID`): converted, exported, burned, already
-  deleted, listed for resale, under a pending purchase offer or under a
-  pending withdrawal request.
+  deleted, upgraded into a collectible.
 - The gift is dropped from every collection it was part of, and its profile
   projection is invalidated.
 

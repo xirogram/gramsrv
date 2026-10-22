@@ -25,7 +25,7 @@ func (s *deleteStarGiftRPCGifts) DeleteStarGift(_ context.Context, req domain.St
 	if s.err != nil {
 		return domain.StarGiftDeleteResult{}, s.err
 	}
-	return domain.StarGiftDeleteResult{SavedGiftID: 11, UniqueGiftID: 22, Deleted: true}, nil
+	return domain.StarGiftDeleteResult{SavedGiftID: 11, Deleted: true}, nil
 }
 
 func deleteStarGiftRouter(t *testing.T) (*Router, *deleteStarGiftRPCGifts, domain.User) {
