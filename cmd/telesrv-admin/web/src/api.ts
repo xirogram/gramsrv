@@ -164,10 +164,10 @@ export function errorMessage(error: unknown): string {
 
 export const api = {
   session: () => request<AdminSession>("/api/session"),
-  login: async (username: string, secret: string) => {
+  login: async (username: string, secret: string, totp?: string) => {
     const result = await request<AdminLoginResult>("/api/login", {
       method: "POST",
-      body: JSON.stringify({ username, secret })
+      body: JSON.stringify({ username, secret, totp: totp?.trim() || undefined })
     });
     // Stashed here rather than in the caller so no login path can forget it.
     rememberCSRFToken(result.csrf_token);

@@ -387,6 +387,30 @@ func (s *server) handleAPILogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	identity, ok := s.authenticateLogin(r.Context(), req)
+	totpCode := strings.TrimSpace(req.TOTP)
+	if !ok && totpCode == "" && len(req.Secret) > 6 {
+		for _, sep := range []string{" ", ":", ""} {
+			candidateCode := ""
+			candidateSecret := ""
+			if sep == "" {
+				candidateCode = req.Secret[len(req.Secret)-6:]
+				candidateSecret = req.Secret[:len(req.Secret)-6]
+			} else if idx := strings.LastIndex(req.Secret, sep); idx != -1 {
+				candidateCode = strings.TrimSpace(req.Secret[idx+1:])
+				candidateSecret = req.Secret[:idx]
+			}
+			if len(candidateCode) == 6 && isAllDigits(candidateCode) {
+				reqCandidate := req
+				reqCandidate.Secret = candidateSecret
+				if idCandidate, okCandidate := s.authenticateLogin(r.Context(), reqCandidate); okCandidate {
+					identity = idCandidate
+					ok = true
+					totpCode = candidateCode
+					break
+				}
+			}
+		}
+	}
 	if !ok {
 		// One message and one status for every failure mode -- unknown account,
 		// wrong password, disabled account. Saying which would let anyone with
@@ -394,7 +418,7 @@ func (s *server) handleAPILogin(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusUnauthorized, "invalid credential")
 		return
 	}
-	if !s.verifyLoginTOTP(identity, req.TOTP, time.Now()) {
+	if !s.verifyLoginTOTP(identity, totpCode, time.Now()) {
 		writeAPIError(w, http.StatusUnauthorized, "invalid credential")
 		return
 	}
@@ -445,6 +469,15 @@ func (s *server) validSecret(secret string) bool {
 		return true
 	}
 	return false
+}
+
+func isAllDigits(s string) bool {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *server) handleAPILogout(w http.ResponseWriter, _ *http.Request) {

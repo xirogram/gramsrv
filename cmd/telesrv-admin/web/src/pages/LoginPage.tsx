@@ -11,6 +11,7 @@ export function LoginPage({ onLogin }: { onLogin: (session: AdminSession) => voi
   const { t } = useI18n();
   const [username, setUsername] = useState("");
   const [secret, setSecret] = useState("");
+  const [totp, setTotp] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   // The operator's own icon, fetched from the public route so the login screen
@@ -33,7 +34,7 @@ export function LoginPage({ onLogin }: { onLogin: (session: AdminSession) => voi
     try {
       // The login answer carries the permission set and the CSRF token; api.login
       // remembers the token, the session state keeps the rights.
-      const result = await api.login(username, secret);
+      const result = await api.login(username, secret, totp);
       onLogin({ actor: result.actor, permissions: result.permissions ?? [] });
     } catch (err) {
       setError(errorMessage(err));
@@ -84,6 +85,19 @@ export function LoginPage({ onLogin }: { onLogin: (session: AdminSession) => voi
               value={secret}
               autoComplete="current-password"
               onChange={(event) => setSecret(event.target.value)}
+            />
+          </label>
+          <label>
+            <span>{t("login.totp")}</span>
+            <input
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              autoComplete="one-time-code"
+              placeholder="123456"
+              maxLength={6}
+              value={totp}
+              onChange={(event) => setTotp(event.target.value)}
             />
           </label>
           <button className="btn primary full" type="submit" disabled={busy || !username.trim()}>
