@@ -4,7 +4,8 @@ Telegram-compatible MTProto server written in Go. This file is a module map so y
 
 ## Identity and branches
 
-- Go module is `telesrv` (Go 1.25), repo is `gramsrv`, binary is `telesrv`. First compatibility target: **Telegram Desktop**. Protocol comes from `github.com/iamxvbaba/td` (fork of gotd/td); do not vendor or fork `td` here.
+- Go module is `telesrv` (Go 1.26), repo is `gramsrv`, binary is `telesrv`. First compatibility target: **Telegram Desktop**. Protocol comes from `github.com/iamxvbaba/td` (fork of gotd/td); do not vendor or fork `td` here.
+- The TL schema layer lives in `td`, not here: `td/tg` holds the canonical Go model and `td/tlprofile` the exact per-layer profiles. Canonical Layer is **232** (`td` v1.7.0, plain module requirement — no local `replace`). `tg.Layer`/`tlprofile.ProfileCanonical` follow it; bumping a layer means a new `td` release first, then the layer-pinned tests in `internal/rpc/layer*_test.go`.
 - `main` = **monolith** (this branch), `v2` = microservices (Edge/Core/Egress/File/SFU). CI runs on `main`, `grammy`, `admin`. Current checkout: `main`.
 - Comments and package docs are commonly written in **Chinese** (e.g. `cmd/telesrv/main.go`, `internal/config/config.go`). Read them; match the style for new code. PowerShell artifacts may display `???` for Chinese in some terminals — the files are UTF-8.
 - No Makefile, no linter config, no test framework beyond stdlib `testing`. Formatting = `gofmt`.
