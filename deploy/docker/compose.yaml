@@ -111,6 +111,8 @@ services:
       TELESRV_DEFAULT_COUNTRY_CODE: ${TELESRV_DEFAULT_COUNTRY_CODE:-CN}
       TELESRV_PUBLIC_BASE_URL: ${TELESRV_PUBLIC_BASE_URL:?set TELESRV_PUBLIC_BASE_URL in deploy/docker/.env}
       TELESRV_PUBLIC_APP_SCHEME: ${TELESRV_PUBLIC_APP_SCHEME:-telesrv}
+      TELESRV_PUBLIC_APP_LINK_BASE: ${TELESRV_PUBLIC_APP_LINK_BASE:-}
+      TELESRV_BOT_API_ADDR: ${TELESRV_BOT_API_ADDR:-}
       TELESRV_PUBLIC_WEB_BASE_URL: ${TELESRV_PUBLIC_WEB_BASE_URL:?set TELESRV_PUBLIC_WEB_BASE_URL in deploy/docker/.env}
       TELESRV_PUBLIC_LINK_WEB_ADDR: ${TELESRV_LOCAL_LISTEN_HOST:-127.0.0.1}:${TELESRV_PUBLIC_LINK_PORT:-2401}
       TELESRV_POSTGRES_DSN: ${TELESRV_POSTGRES_DSN:?set TELESRV_POSTGRES_DSN in deploy/docker/.env}
@@ -171,6 +173,8 @@ services:
         condition: service_healthy
     volumes:
       - server_state:/var/lib/telesrv
+      # Optional sticker/reaction seed (TELESRV_STICKER_SEED_DIR resolves to /app/data/sticker-seed).
+      - ${TELESRV_STICKER_SEED_HOST_DIR:-../../data/sticker-seed}:/app/data/sticker-seed:ro
     network_mode: host
     healthcheck:
       test:

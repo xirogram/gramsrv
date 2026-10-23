@@ -447,8 +447,9 @@ Streams the file, chunk by chunk, with the stored MIME type and
 `ip_address` is rejected with `IP_ADDRESS_UNSUPPORTED` — the gateway uses the
 configured address list.
 
-Setting a webhook while `getUpdates` is long-polling, or while a delivery is
-in flight, returns `409 CONFLICT`.
+Setting a webhook while `getUpdates` is long-polling returns `409 CONFLICT`.
+While a delivery is in flight, `setWebhook` waits up to 20 seconds for it to
+finish and returns `409 CONFLICT` only if the delivery is still running.
 
 Delivery behaviour:
 
@@ -471,7 +472,9 @@ Returns `url`, `has_custom_certificate` (always `false` here),
 
 ### `deleteWebhook`
 
-`drop_pending_updates` is optional. Returns `409` while a delivery is active.
+`drop_pending_updates` is optional. Like `setWebhook`, it waits up to 20
+seconds for an in-flight delivery and returns `409` only if that delivery is
+still running.
 
 ## Methods: menus, emoji status, web apps
 

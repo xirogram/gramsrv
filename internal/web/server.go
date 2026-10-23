@@ -207,6 +207,7 @@ func newHandler(cfg Config, logger *zap.Logger) (http.Handler, error) {
 	mux.HandleFunc("GET /addstickers/{shortName}", h.addStickers)
 	mux.HandleFunc("GET /addemoji/{shortName}", h.addEmoji)
 	mux.HandleFunc("GET /addlist/{slug}", h.addList)
+	mux.HandleFunc("GET /joinchat/{hash}", h.joinChatLink)
 	mux.HandleFunc("GET /nft/{slug}", h.uniqueGift)
 	mux.HandleFunc("GET /nft/{slug}/{$}", h.uniqueGift)
 	registerBearerCapabilityRoute(mux, "GET", publicRoutePrefix+"/gift-withdrawal/{requestID}", h.starGiftWithdrawal)
@@ -675,6 +676,37 @@ func (h *handler) addList(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (h *handler) joinChatLink(w http.ResponseWriter, r *http.Request) {
+	h.inviteLink(w, strings.TrimSpace(r.PathValue("hash")))
+}
+
+// inviteLink renders a landing page for /+HASH and /joinchat/HASH that opens
+// the invite in the app. It does not resolve the chat: the app shows the
+// preview (messages.checkChatInvite) once it opens the link.
+func (h *handler) inviteLink(w http.ResponseWriter, hash string) {
+	if !links.ValidInviteHash(hash) {
+		h.serveUsernameNotFound(w, "+"+hash)
+		return
+	}
+	app := h.appLinks.BuildInvite(hash)
+	data := pageData{
+		AppName:      h.appName,
+		Title:        "Group Invite",
+		KindLabel:    "invite link",
+		Subtitle:     "+" + hash,
+		Description:  "This page opens the app so you can preview and join this chat.",
+		CanonicalURL: h.publicBaseURL + "/+" + hash,
+		AppURL:       template.URL(app),
+		LegacyTgURL:  template.URL(legacyTgURL("join", "invite", hash)),
+	}
+	data.AppURLJS = template.JS(strconv.Quote(app))
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=60")
+	if err := landingTemplate.Execute(w, data); err != nil {
+		http.Error(w, "render invite page failed", http.StatusInternalServerError)
+	}
+}
+
 func (h *handler) uniqueGift(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
 	if h.uniqueGifts == nil || !validStarGiftSlugPath(slug) {
@@ -734,6 +766,11 @@ func (h *handler) uniqueGift(w http.ResponseWriter, r *http.Request) {
 
 func (h *handler) usernameLink(w http.ResponseWriter, r *http.Request) {
 	username := strings.TrimSpace(r.PathValue("username"))
+	// /+HASH is an invite link (the t.me form), not a username.
+	if hash, ok := strings.CutPrefix(username, "+"); ok {
+		h.inviteLink(w, hash)
+		return
+	}
 	if !validUsernamePath(username) {
 		h.serveUsernameNotFound(w, username)
 		return

@@ -685,6 +685,41 @@ func (h *handler) dropPendingUpdates(w http.ResponseWriter, r *http.Request, bot
 	writeAPIOK(w, true)
 }
 
+// webhookLeaseWait bounds how long setWebhook/deleteWebhook wait for an
+// in-flight delivery. A delivery holds the lease for at most one webhook round
+// trip (webhookHTTPClient timeout), so this outlasts it with some slack.
+var webhookLeaseWait = 20 * time.Second
+
+// acquireWebhookLeaseWaiting takes the webhook lease for a config change,
+// waiting out a running delivery instead of failing: Telegram never rejects
+// setWebhook/deleteWebhook because an update is being delivered, and bots that
+// call deleteWebhook right after a delivery would otherwise keep a webhook and
+// get 409 from getUpdates.
+func acquireWebhookLeaseWaiting(ctx context.Context, control GatewayWebhookControl, botID int64, owner string) (bool, error) {
+	deadline := time.NewTimer(webhookLeaseWait)
+	defer deadline.Stop()
+	backoff := 25 * time.Millisecond
+	for {
+		acquired, err := control.AcquireBotAPIWebhookLease(ctx, botID, owner, webhookLeaseTTL)
+		if err != nil || acquired {
+			return acquired, err
+		}
+		retry := time.NewTimer(backoff)
+		select {
+		case <-retry.C:
+		case <-deadline.C:
+			retry.Stop()
+			return false, nil
+		case <-ctx.Done():
+			retry.Stop()
+			return false, ctx.Err()
+		}
+		if backoff < 500*time.Millisecond {
+			backoff *= 2
+		}
+	}
+}
+
 func (h *handler) deleteWebhook(w http.ResponseWriter, r *http.Request, botID int64) {
 	values, err := requestValues(r)
 	if err != nil {
@@ -701,7 +736,7 @@ func (h *handler) deleteWebhook(w http.ResponseWriter, r *http.Request, botID in
 		writeAPIError(w, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR")
 		return
 	} else if found {
-		acquired, err := control.AcquireBotAPIWebhookLease(r.Context(), botID, leaseOwner, 30*time.Second)
+		acquired, err := acquireWebhookLeaseWaiting(r.Context(), control, botID, leaseOwner)
 		if err != nil {
 			writeAPIError(w, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR")
 			return
@@ -1345,7 +1380,7 @@ func (h *handler) setWebhook(w http.ResponseWriter, r *http.Request, botID int64
 		writeAPIError(w, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR")
 		return
 	} else if found {
-		acquired, err := control.AcquireBotAPIWebhookLease(r.Context(), botID, webhookOwner, 30*time.Second)
+		acquired, err := acquireWebhookLeaseWaiting(r.Context(), control, botID, webhookOwner)
 		if err != nil {
 			writeAPIError(w, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR")
 			return

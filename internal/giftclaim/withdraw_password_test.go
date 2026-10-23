@@ -32,10 +32,28 @@ type withdrawalClaimStore struct {
 	ownerID  int64
 	ownedBy  int64
 	bindCall int
+	resolved int
 }
 
 func (s *withdrawalClaimStore) ResolveGiftByRef(context.Context, string) (domain.UniqueStarGift, bool, error) {
+	s.resolved++
 	return s.gift, s.gift.ID != 0, nil
+}
+
+// cmd/telesrv wires *account.Service as Config.Password.
+var _ AccountPassword = (*account.Service)(nil)
+
+// withdrawalPasswordAccount keeps the account service's real SRP challenge and
+// check, and pins the durable 2FA facts the withdrawal gate reads first.
+type withdrawalPasswordAccount struct {
+	*account.Service
+	state domain.RevenueWithdrawalPasswordState
+}
+
+func (a *withdrawalPasswordAccount) RevenueWithdrawalPasswordState(
+	context.Context,
+	int64) (domain.RevenueWithdrawalPasswordState, error) {
+	return a.state, nil
 }
 
 func (s *withdrawalClaimStore) SavedGiftOwner(context.Context, int64) (string, int64, bool, error) {
@@ -183,6 +201,91 @@ func decodeClaimHex(value string) ([]byte, error) {
 	return out, nil
 }
 
+func newWithdrawalClaimService(
+	t *testing.T,
+	botToken string,
+	userID int64,
+	passwords AccountPassword) (*Service, *withdrawalClaimStore, *withdrawalClaimWithdrawer) {
+	t.Helper()
+	store := &withdrawalClaimStore{
+		gift:    domain.UniqueStarGift{ID: 11, Slug: "withdrawal-claim-gift"},
+		owner:   "user",
+		ownerID: userID,
+	}
+	withdrawer := &withdrawalClaimWithdrawer{}
+	return &Service{
+		publicBaseURL: "https://claim.example",
+		proofDomain:   "claim.example",
+		botToken:      botToken,
+		basePath:      "/claim",
+		botHandle:     "@claimtest",
+		collection:    "test-collection",
+		appName:       "InvGram Gifts",
+		initDataTTL:   15 * time.Minute,
+		store:         store,
+		withdrawer:    withdrawer,
+		password:      passwords,
+		logger:        zaptest.NewLogger(t),
+	}, store, withdrawer
+}
+
+func withdrawalBody(t *testing.T, password *WithdrawalPasswordInput) string {
+	t.Helper()
+	body, err := json.Marshal(struct {
+		Gift     string                   `json:"gift"`
+		Password *WithdrawalPasswordInput `json:"password,omitempty"`
+	}{Gift: "withdrawal-claim-gift", Password: password})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(body)
+}
+
+// The web export mirrors Layer 232 getStarGiftWithdrawalUrl: no 2FA means
+// PASSWORD_MISSING before the gift is even resolved, with or without a proof.
+func TestWithdrawalRequiresTwoStepPassword(t *testing.T) {
+	const userID int64 = 434343
+	const botToken = "999999:test-token-secret"
+	passwords := &withdrawalPasswordAccount{
+		Service: account.NewService(memory.NewPasswordStore()),
+		state:   domain.RevenueWithdrawalPasswordState{HasPassword: false},
+	}
+	service, store, withdrawer := newWithdrawalClaimService(t, botToken, userID, passwords)
+	initData := signedClaimInitData(botToken, userID, time.Now())
+	post := func(path string, body string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/claim"+path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Telegram-Init-Data", initData)
+		recorder := httptest.NewRecorder()
+		service.ServeHTTP(recorder, req)
+		return recorder
+	}
+
+	challengePage := post("/api/wallet/password", "{}")
+	if challengePage.Code != http.StatusOK {
+		t.Fatalf("challenge status = %d body=%s", challengePage.Code, challengePage.Body.String())
+	}
+	var challenge PasswordChallenge
+	if err := json.Unmarshal(challengePage.Body.Bytes(), &challenge); err != nil {
+		t.Fatalf("decode challenge: %v", err)
+	}
+	if challenge.HasPassword || challenge.SRPID != 0 {
+		t.Fatalf("challenge = %+v, want has_password=false like account.getPassword", challenge)
+	}
+
+	forged := &WithdrawalPasswordInput{SRPID: 1, A: "01", M1: "02"}
+	for name, password := range map[string]*WithdrawalPasswordInput{"no proof": nil, "forged proof": forged} {
+		page := post("/api/wallet/withdraw", withdrawalBody(t, password))
+		if page.Code != http.StatusBadRequest || !strings.Contains(page.Body.String(), ErrPasswordMissing.Error()) {
+			t.Fatalf("%s: withdraw without 2FA = %d %s", name, page.Code, page.Body.String())
+		}
+	}
+	if store.resolved != 0 || withdrawer.calls != 0 {
+		t.Fatalf("gift resolved %d times, withdrawer called %d times before 2FA", store.resolved, withdrawer.calls)
+	}
+}
+
 func TestWithdrawalPasswordChallengeAndSRPConfirm(t *testing.T) {
 	const userID int64 = 424242
 	const botToken = "999999:test-token-secret"
@@ -207,24 +310,11 @@ func TestWithdrawalPasswordChallengeAndSRPConfirm(t *testing.T) {
 		t.Fatalf("set password: %v", err)
 	}
 
-	service := &Service{
-		publicBaseURL: "https://claim.example",
-		proofDomain:   "claim.example",
-		botToken:      botToken,
-		basePath:      "/claim",
-		botHandle:     "@claimtest",
-		collection:    "test-collection",
-		appName:       "InvGram Gifts",
-		initDataTTL:   15 * time.Minute,
-		store: &withdrawalClaimStore{
-			gift:    domain.UniqueStarGift{ID: 11, Slug: "withdrawal-claim-gift"},
-			owner:   "user",
-			ownerID: userID,
-		},
-		withdrawer: &withdrawalClaimWithdrawer{},
-		password:   accountSvc,
-		logger:     zaptest.NewLogger(t),
+	passwords := &withdrawalPasswordAccount{
+		Service: accountSvc,
+		state:   domain.RevenueWithdrawalPasswordState{HasPassword: true, PasswordChangedAt: now.Add(-25 * time.Hour)},
 	}
+	service, store, withdrawer := newWithdrawalClaimService(t, botToken, userID, passwords)
 	initData := signedClaimInitData(botToken, userID, now)
 
 	post := func(path string, body string) *httptest.ResponseRecorder {
@@ -257,37 +347,44 @@ func TestWithdrawalPasswordChallengeAndSRPConfirm(t *testing.T) {
 	}
 
 	proof := claimSRPProof(t, challenge, secret)
-	withoutPassword, err := json.Marshal(map[string]string{"gift": "withdrawal-claim-gift"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	rejected := post("/api/wallet/withdraw", string(withoutPassword))
+	rejected := post("/api/wallet/withdraw", withdrawalBody(t, nil))
 	if rejected.Code != http.StatusBadRequest || !strings.Contains(rejected.Body.String(), ErrPasswordInvalid.Error()) {
 		t.Fatalf("withdraw without password = %d %s", rejected.Code, rejected.Body.String())
 	}
 
 	tampered := proof
 	tampered.M1 = strings.Repeat("00", sha256.Size)
-	badBody, err := json.Marshal(struct {
-		Gift     string                   `json:"gift"`
-		Password *WithdrawalPasswordInput `json:"password"`
-	}{Gift: "withdrawal-claim-gift", Password: &tampered})
-	if err != nil {
-		t.Fatal(err)
-	}
-	badPage := post("/api/wallet/withdraw", string(badBody))
+	badPage := post("/api/wallet/withdraw", withdrawalBody(t, &tampered))
 	if badPage.Code != http.StatusBadRequest {
 		t.Fatalf("withdraw with wrong M1 = %d %s", badPage.Code, badPage.Body.String())
 	}
 
-	body, err := json.Marshal(struct {
-		Gift     string                   `json:"gift"`
-		Password *WithdrawalPasswordInput `json:"password"`
-	}{Gift: "withdrawal-claim-gift", Password: &proof})
-	if err != nil {
-		t.Fatal(err)
+	// A correct answer for a password changed an hour ago is PASSWORD_TOO_FRESH:
+	// about 23h remain, and the gift must stay unresolved.
+	passwords.state.PasswordChangedAt = now.Add(-time.Hour)
+	freshPage := post("/api/wallet/withdraw", withdrawalBody(t, &proof))
+	retryAfter, err := strconv.Atoi(freshPage.Header().Get("Retry-After"))
+	if freshPage.Code != http.StatusBadRequest || err != nil ||
+		retryAfter <= 22*3600 || retryAfter > 23*3600 ||
+		!strings.Contains(freshPage.Body.String(), (&PasswordTooFreshError{RetryAfter: retryAfter}).Error()) {
+		t.Fatalf("withdraw with fresh password = %d Retry-After=%q %s",
+			freshPage.Code, freshPage.Header().Get("Retry-After"), freshPage.Body.String())
 	}
-	okPage := post("/api/wallet/withdraw", string(body))
+
+	// HasPassword without a change time breaks the 2FA invariant: fail closed.
+	passwords.state.PasswordChangedAt = time.Time{}
+	brokenPage := post("/api/wallet/withdraw", withdrawalBody(t, &proof))
+	if brokenPage.Code != http.StatusNotFound || !strings.Contains(brokenPage.Body.String(), ErrWalletUnavailable.Error()) {
+		t.Fatalf("withdraw without password change time = %d %s", brokenPage.Code, brokenPage.Body.String())
+	}
+	if store.resolved != 0 || withdrawer.calls != 0 {
+		t.Fatalf("gift resolved %d times, withdrawer called %d times before 2FA passed", store.resolved, withdrawer.calls)
+	}
+
+	// The gate reads 2FA facts without rotating SRP, so the challenge fetched
+	// above still verifies once the password is old enough.
+	passwords.state.PasswordChangedAt = now.Add(-25 * time.Hour)
+	okPage := post("/api/wallet/withdraw", withdrawalBody(t, &proof))
 	if okPage.Code != http.StatusOK {
 		t.Fatalf("withdraw status = %d body=%s", okPage.Code, okPage.Body.String())
 	}

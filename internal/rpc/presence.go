@@ -407,13 +407,24 @@ type botStatusResult struct {
 }
 
 func (r *Router) userBotStatus(ctx context.Context, userID int64) (bool, bool) {
-	if userID == 0 || r.deps.Users == nil {
+	bot, known, err := r.lookupUserBotStatus(ctx, userID)
+	if err != nil {
 		return false, false
+	}
+	return bot, known
+}
+
+// lookupUserBotStatus is userBotStatus with the lookup error kept, for write
+// paths where an unavailable classification must abort instead of being
+// guessed as either a bot or a human account.
+func (r *Router) lookupUserBotStatus(ctx context.Context, userID int64) (bool, bool, error) {
+	if userID == 0 || r.deps.Users == nil {
+		return false, false, nil
 	}
 	// bot 标志不可变 → 永久 in-process 缓存，避免 announceSessionOnline 每 RPC 都发一次重投影
 	// Users.ByID。仅缓存已存在的用户结果。命中后纯内存。
 	if v, ok := r.botStatus.Load(userID); ok {
-		return v.(bool), true
+		return v.(bool), true, nil
 	}
 	// 冷启动洪峰下用 singleflight 合并并发首查：~50 个并发首帧只打 1 次 PG（其余共享），
 	// 避免 Users.ByID 重投影 herd（曾让首帧 user_resolve 飙到 ~1.1s）。
@@ -437,10 +448,10 @@ func (r *Router) userBotStatus(ctx context.Context, userID int64) (bool, bool) {
 		return botStatusResult{bot: u.Bot, known: true}, nil
 	})
 	if err != nil {
-		return false, false
+		return false, false, err
 	}
 	result := v.(botStatusResult)
-	return result.bot, result.known
+	return result.bot, result.known, nil
 }
 
 func (r *Router) userPresenceStatus(userID int64) domain.UserStatus {

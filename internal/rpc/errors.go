@@ -294,6 +294,7 @@ func sessionPasswordNeededErr() error { return tgerr.New(401, "SESSION_PASSWORD_
 func passwordHashInvalidErr() error   { return tgerr.New(400, "PASSWORD_HASH_INVALID") }
 func srpIDInvalidErr() error          { return tgerr.New(400, "SRP_ID_INVALID") }
 func srpPasswordChangedErr() error    { return tgerr.New(400, "SRP_PASSWORD_CHANGED") }
+func tmpPasswordInvalidErr() error    { return tgerr.New(400, "TMP_PASSWORD_INVALID") }
 func newSettingsInvalidErr() error    { return tgerr.New(400, "NEW_SETTINGS_INVALID") }
 func newSaltInvalidErr() error        { return tgerr.New(400, "NEW_SALT_INVALID") }
 func emailInvalidErr() error          { return tgerr.New(400, "EMAIL_INVALID") }
@@ -480,6 +481,8 @@ func passwordErr(err error) error {
 		return srpIDInvalidErr()
 	case errors.Is(err, domain.ErrSRPPasswordChanged):
 		return srpPasswordChangedErr()
+	case errors.Is(err, domain.ErrTmpPasswordInvalid):
+		return tmpPasswordInvalidErr()
 	case errors.Is(err, domain.ErrNewSettingsInvalid):
 		return newSettingsInvalidErr()
 	case errors.Is(err, domain.ErrNewSaltInvalid):

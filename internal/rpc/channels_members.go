@@ -325,6 +325,20 @@ func (r *Router) onChannelsInviteToChannel(ctx context.Context, req *tg.Channels
 	if !view.Self.CanInviteUsers(view.Channel) {
 		return nil, channelInviteErr(domain.ErrChannelAdminRequired)
 	}
+	// Bots can join a broadcast channel only as admins (channels.editAdmin);
+	// chat_invite privacy no longer filters them, so reject the plain-member
+	// write explicitly, as TDesktop's local USER_BOT handling expects.
+	if view.Channel.Broadcast && !view.Channel.Megagroup {
+		for _, targetUserID := range userIDs {
+			bot, _, err := r.lookupUserBotStatus(ctx, targetUserID)
+			if err != nil {
+				return nil, internalErr()
+			}
+			if bot {
+				return nil, tgerr400("USER_BOT")
+			}
+		}
+	}
 	userIDs, missingInvitees, err := r.filterChatInvitePrivacy(ctx, userID, userIDs)
 	if err != nil {
 		return nil, internalErr()

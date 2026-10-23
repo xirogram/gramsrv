@@ -376,6 +376,10 @@ func writeClaimError(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrProfileOwnerOnly):
 		status = http.StatusForbidden
 	}
+	var tooFresh *PasswordTooFreshError
+	if errors.As(err, &tooFresh) {
+		w.Header().Set("Retry-After", strconv.Itoa(tooFresh.RetryAfter))
+	}
 	writeJSON(w, status, map[string]string{"error": strings.TrimSpace(err.Error())})
 }
 

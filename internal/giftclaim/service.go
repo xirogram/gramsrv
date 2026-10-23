@@ -37,7 +37,23 @@ var (
 	ErrProfileOwnerOnly  = errors.New("подарок закреплён за другим профилем")
 	ErrExportUnavailable = errors.New("этот подарок пока нельзя вывести в TON")
 	ErrPasswordInvalid   = errors.New("неверный пароль для подтверждения вывода")
+	ErrPasswordMissing   = errors.New("для вывода включите двухэтапную аутентификацию")
 )
+
+// withdrawalPasswordFreshness matches the MTProto revenueWithdrawalFreshness
+// window behind PASSWORD_TOO_FRESH_<wait>.
+const withdrawalPasswordFreshness = 24 * time.Hour
+
+// PasswordTooFreshError is the claim page's PASSWORD_TOO_FRESH_<wait>: the 2FA
+// password was set or changed less than withdrawalPasswordFreshness ago.
+type PasswordTooFreshError struct {
+	RetryAfter int
+}
+
+func (e *PasswordTooFreshError) Error() string {
+	minutes := (e.RetryAfter + 59) / 60
+	return fmt.Sprintf("пароль изменён недавно: вывод станет доступен через %d ч %02d мин", minutes/60, minutes%60)
+}
 
 type Store interface {
 	ResolveOnChainGift(context.Context, string) (domain.UniqueStarGift, bool, error)
@@ -87,11 +103,13 @@ type Withdrawer interface {
 }
 
 // AccountPassword is the 2FA half of the web withdrawal flow: GetPassword
-// hands out one SRP challenge and CheckPassword verifies the client's M1.
-// The plaintext password stays in the browser, never in gramsrv.
+// hands out one SRP challenge, CheckPassword verifies the client's M1, and
+// RevenueWithdrawalPasswordState reads the 2FA facts without rotating that
+// challenge. The plaintext password stays in the browser, never in gramsrv.
 type AccountPassword interface {
 	GetPassword(context.Context, int64) (domain.PasswordSettings, error)
 	CheckPassword(context.Context, int64, domain.PasswordCheck) error
+	RevenueWithdrawalPasswordState(context.Context, int64) (domain.RevenueWithdrawalPasswordState, error)
 }
 
 // Limiter matches store.RateLimiter so this package keeps no store dependency.
@@ -218,8 +236,8 @@ type PasswordChallenge struct {
 	Salt2       string `json:"salt2,omitempty"`
 }
 
-// WithdrawalPasswordInput is one SRP answer. A nil value means the caller sent
-// inputCheckPasswordEmpty, valid only when the account has no 2FA password.
+// WithdrawalPasswordInput is one SRP answer. A nil value is no proof and never
+// passes: unlike inputCheckPasswordEmpty, it does not admit passwordless accounts.
 type WithdrawalPasswordInput struct {
 	SRPID int64  `json:"srp_id,string"`
 	A     string `json:"a"`
@@ -732,7 +750,7 @@ func (s *Service) WithdrawalPasswordChallenge(
 }
 
 // WithdrawToChain issues the export link payments.getStarGiftWithdrawalUrl returns over MTProto,
-// gated on the same 2FA SRP answer the MTProto method expects.
+// behind the same 2FA preconditions; only the proof differs (SRP here, tmp_password there).
 func (s *Service) WithdrawToChain(
 	ctx context.Context,
 	initData,
@@ -743,7 +761,7 @@ func (s *Service) WithdrawToChain(
 	if err != nil {
 		return WithdrawResult{}, err
 	}
-	if err := s.checkWithdrawalPassword(ctx, user.ID, password); err != nil {
+	if err := s.checkWithdrawalPassword(ctx, user.ID, password, now); err != nil {
 		return WithdrawResult{}, err
 	}
 	store, ok := s.store.(walletStore)
@@ -806,24 +824,38 @@ func (s *Service) requireSavedOwner(
 	return nil
 }
 
-// checkWithdrawalPassword maps one SRP answer onto the account 2FA state. An
-// absent answer means inputCheckPasswordEmpty, which checkSRP accepts only for
-// accounts that never set a password.
-func (s *Service) checkWithdrawalPassword(ctx context.Context, userID int64, in *WithdrawalPasswordInput) error {
+// checkWithdrawalPassword applies the Layer 232 getStarGiftWithdrawalUrl order:
+// 2FA must be set (PASSWORD_MISSING), the proof must match, then the password
+// must be older than withdrawalPasswordFreshness (PASSWORD_TOO_FRESH).
+// WHY: the 2FA facts come from RevenueWithdrawalPasswordState, not GetPassword,
+// because GetPassword rotates the SRP challenge the browser has just answered.
+func (s *Service) checkWithdrawalPassword(ctx context.Context, userID int64, in *WithdrawalPasswordInput, now time.Time) error {
 	if s.password == nil {
 		return ErrWalletUnavailable
 	}
-	check := domain.PasswordCheck{Empty: true}
-	if in != nil {
-		a, errA := hex.DecodeString(strings.TrimSpace(in.A))
-		m1, errM1 := hex.DecodeString(strings.TrimSpace(in.M1))
-		if errA != nil || errM1 != nil || len(a) == 0 || len(m1) == 0 {
-			return ErrPasswordInvalid
-		}
-		check = domain.PasswordCheck{SRPID: in.SRPID, A: a, M1: m1}
+	state, err := s.password.RevenueWithdrawalPasswordState(ctx, userID)
+	if err != nil {
+		return ErrWalletUnavailable
 	}
-	if err := s.password.CheckPassword(ctx, userID, check); err != nil {
+	if !state.HasPassword {
+		return ErrPasswordMissing
+	}
+	if in == nil {
 		return ErrPasswordInvalid
+	}
+	a, errA := hex.DecodeString(strings.TrimSpace(in.A))
+	m1, errM1 := hex.DecodeString(strings.TrimSpace(in.M1))
+	if errA != nil || errM1 != nil || len(a) == 0 || len(m1) == 0 {
+		return ErrPasswordInvalid
+	}
+	if err := s.password.CheckPassword(ctx, userID, domain.PasswordCheck{SRPID: in.SRPID, A: a, M1: m1}); err != nil {
+		return ErrPasswordInvalid
+	}
+	if state.PasswordChangedAt.IsZero() {
+		return ErrWalletUnavailable
+	}
+	if remaining := state.PasswordChangedAt.Add(withdrawalPasswordFreshness).Sub(now); remaining > 0 {
+		return &PasswordTooFreshError{RetryAfter: int((remaining + time.Second - 1) / time.Second)}
 	}
 	return nil
 }

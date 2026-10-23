@@ -727,6 +727,35 @@ func TestHandlerServesChatlistLandingPage(t *testing.T) {
 	}
 }
 
+func TestHandlerServesInviteLandingPage(t *testing.T) {
+	for _, path := range []string{"/+-8xLylQARl-KhfaVnD7xNeQv", "/joinchat/-8xLylQARl-KhfaVnD7xNeQv"} {
+		rr := httptest.NewRecorder()
+		newTestHandler(t, fakeResolver{}, "http://127.0.0.1:2401").ServeHTTP(rr, httptest.NewRequest(http.MethodGet, path, nil))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, want 200; body=%s", path, rr.Code, rr.Body.String())
+		}
+		body := rr.Body.String()
+		for _, want := range []string{
+			"Group Invite",
+			"http://127.0.0.1:2401/&#43;-8xLylQARl-KhfaVnD7xNeQv", // html/template escapes "+" in attributes
+			"telesrv://join?invite=-8xLylQARl-KhfaVnD7xNeQv",
+			"tg://join?invite=-8xLylQARl-KhfaVnD7xNeQv",
+		} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("%s body missing %q:\n%s", path, want, body)
+			}
+		}
+		if strings.Contains(body, "Username not found") {
+			t.Fatalf("%s rendered as a username lookup:\n%s", path, body)
+		}
+	}
+	rr := httptest.NewRecorder()
+	newTestHandler(t, fakeResolver{}, "http://127.0.0.1:2401").ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/+bad.hash", nil))
+	if strings.Contains(rr.Body.String(), "join?invite=") {
+		t.Fatalf("invalid invite hash produced an app link:\n%s", rr.Body.String())
+	}
+}
+
 func TestHandlerServesBotUsernameLandingPage(t *testing.T) {
 	users := fakeUsers{
 		"tetrisbot": {
@@ -811,6 +840,8 @@ func TestHandlerUsesConfiguredClientLinksAndBrand(t *testing.T) {
 		{path: "/addstickers/stickers_pack", want: "owpg://tenant.example.test/addstickers?set=stickers_pack"},
 		{path: "/addemoji/emoji_pack", want: "owpg://tenant.example.test/addemoji?set=emoji_pack"},
 		{path: "/addlist/shared-folder", want: "owpg://tenant.example.test/addlist?slug=shared-folder"},
+		{path: "/+AbC-123_xyz", want: "owpg://tenant.example.test/+AbC-123_xyz"},
+		{path: "/joinchat/AbC-123_xyz", want: "owpg://tenant.example.test/+AbC-123_xyz"},
 		{path: "/nft/gift-1", want: "owpg://tenant.example.test/nft?slug=gift-1"},
 	} {
 		rr := httptest.NewRecorder()

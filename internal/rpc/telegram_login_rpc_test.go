@@ -108,7 +108,7 @@ func (f *telegramLoginRPCFixture) authorization(t *testing.T, match bool) telegr
 }
 
 func TestTelegramLoginRPCsAcrossExactLayerProfiles(t *testing.T) {
-	for profile := tlprofile.Profile225; profile <= tlprofile.Profile231; profile++ {
+	for profile := tlprofile.Profile225; profile <= tlprofile.Profile232; profile++ {
 		t.Run(fmt.Sprintf("layer_%d", profile), func(t *testing.T) {
 			f := newTelegramLoginRPCFixture(t)
 
@@ -134,7 +134,7 @@ func TestTelegramLoginRPCsAcrossExactLayerProfiles(t *testing.T) {
 				t.Fatalf("encode exact Layer %d login result: %v", profile, err)
 			}
 			wantID := uint32(0x3cd623ec)
-			if profile == tlprofile.Profile231 {
+			if profile >= tlprofile.Profile231 {
 				wantID = 0xbdca6167
 			}
 			if got, _ := resultWire.PeekID(); got != wantID {

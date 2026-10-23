@@ -13,25 +13,15 @@ import (
 	"go.uber.org/zap/zaptest"
 )
 
-// Layer 231 is the canonical profile of the published schema. The server must
-// admit it, keep it as the session default and never clamp it to an older
-// profile.
-func TestLayer231IsSupportedCanonicalProfile(t *testing.T) {
+// Layer 231 stays an exact historical profile after canonical moved to 232:
+// it resolves to itself and is never clamped to another profile.
+func TestLayer231StaysSupportedExactProfile(t *testing.T) {
 	profile, ok := tlprofile.ResolveProfile(231)
 	if !ok || profile != tlprofile.Profile231 {
 		t.Fatalf("ResolveProfile(231) = %d, %v, want Profile231", profile, ok)
 	}
 	if !isSupportedLayer(231) {
 		t.Fatal("isSupportedLayer(231) = false, want true")
-	}
-	if isSupportedLayer(232) {
-		t.Fatal("isSupportedLayer(232) = true, want false for an ungenerated future layer")
-	}
-	if int(tlprofile.ProfileCanonical) != 231 {
-		t.Fatalf("canonical profile = %d, want 231", tlprofile.ProfileCanonical)
-	}
-	if currentClientLayer != 231 {
-		t.Fatalf("currentClientLayer = %d, want 231", currentClientLayer)
 	}
 }
 
