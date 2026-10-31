@@ -15,6 +15,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -39,6 +40,7 @@ import (
 	"github.com/iamxvbaba/td/telegram/dcs"
 	"github.com/iamxvbaba/td/telegram/downloader"
 	"github.com/iamxvbaba/td/tg"
+	"github.com/iamxvbaba/td/tgerr"
 	"golang.org/x/net/proxy"
 	"golang.org/x/sync/errgroup"
 	"rsc.io/qr"
@@ -215,6 +217,7 @@ func main() {
 	reuseMetadata := flag.Bool("reuse-metadata", false, "reuse and strictly decode catalog.tl plus upgrade-attributes/*.tl instead of refetching metadata")
 	allowedMissingThumbsRaw := flag.String("allow-missing-thumb", "", "comma-separated document_id:photo|video:type entries that may be recorded as explicitly missing after a failed download")
 	loginQR := flag.Bool("login-qr", false, "authorize the SESSION file through a QR login and exit without fetching (Telegram -> Settings -> Devices -> Link Desktop Device)")
+	loginPassword := flag.String("password", "", "2FA cloud password if two-step verification is enabled (or use PASSWORD / TG_PASSWORD env)")
 	qrPNG := flag.String("qr-png", "", "also write each rotated QR login token as a PNG to this path (default: <session>.qr.png)")
 	flag.Parse()
 
@@ -236,7 +239,7 @@ func main() {
 		dispatcher := tg.NewUpdateDispatcher()
 		opts.UpdateHandler = dispatcher
 		run(defaultLoginTimeout, opts, func(ctx context.Context, client *telegram.Client) error {
-			return loginQRToken(ctx, client, dispatcher, qrPNGPath(session, *qrPNG))
+			return loginQRToken(ctx, client, dispatcher, qrPNGPath(session, *qrPNG), *loginPassword)
 		})
 		return
 	}
@@ -290,7 +293,7 @@ func run(timeout time.Duration, opts telegram.Options, fn func(context.Context, 
 
 // loginQRToken 用 QR 登录换取授权用户会话并落盘到 SESSION。
 // 不需要手机号和短信码：把 show 打印的二维码在已登录的 Telegram 里扫出来即可。
-func loginQRToken(ctx context.Context, client *telegram.Client, dispatcher tg.UpdateDispatcher, pngPath string) error {
+func loginQRToken(ctx context.Context, client *telegram.Client, dispatcher tg.UpdateDispatcher, pngPath, explicitPassword string) error {
 	status, err := client.Auth().Status(ctx)
 	if err != nil {
 		return fmt.Errorf("auth status: %w", err)
@@ -307,7 +310,19 @@ func loginQRToken(ctx context.Context, client *telegram.Client, dispatcher tg.Up
 		return showLoginQR(token.URL(), pngPath)
 	})
 	if err != nil {
-		return fmt.Errorf("qr login: %w", err)
+		if tgerr.Is(err, "SESSION_PASSWORD_NEEDED") || strings.Contains(err.Error(), "SESSION_PASSWORD_NEEDED") {
+			fmt.Println("[2fa] two-step verification password is required")
+			pass, passErr := resolvePassword(explicitPassword)
+			if passErr != nil {
+				return fmt.Errorf("resolve 2fa password: %w", passErr)
+			}
+			authorization, err = client.Auth().Password(ctx, pass)
+			if err != nil {
+				return fmt.Errorf("2fa password check: %w", err)
+			}
+		} else {
+			return fmt.Errorf("qr login: %w", err)
+		}
 	}
 	user, ok := authorization.User.AsNotEmpty()
 	if !ok {
@@ -315,6 +330,24 @@ func loginQRToken(ctx context.Context, client *telegram.Client, dispatcher tg.Up
 	}
 	fmt.Printf("[authorized] id=%d username=%s bot=%v\n", user.ID, user.Username, user.Bot)
 	return nil
+}
+
+func resolvePassword(flagVal string) (string, error) {
+	if flagVal = strings.TrimSpace(flagVal); flagVal != "" {
+		return flagVal, nil
+	}
+	for _, envKey := range []string{"TG_PASSWORD", "TG_2FA_PASSWORD", "PASSWORD"} {
+		if val := strings.TrimSpace(os.Getenv(envKey)); val != "" {
+			return val, nil
+		}
+	}
+	fmt.Print("Enter 2FA cloud password: ")
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadString('\n')
+	if err != nil && len(line) == 0 {
+		return "", errors.New("2FA password required but stdin is closed")
+	}
+	return strings.TrimSpace(line), nil
 }
 
 // qrPNGPath 决定二维码 PNG 的落盘位置：默认与 SESSION 同名加后缀。
