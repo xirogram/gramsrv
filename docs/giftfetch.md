@@ -24,9 +24,16 @@ SESSION=/root/.giftfetch.session go run ./cmd/giftfetch -login-qr
 ```
 
 Scan the code from an already-logged-in Telegram:
-**Settings → Devices → Link Desktop Device**. There is no phone number, no SMS
-code and no 2FA password involved. The command authorizes the `SESSION` file and
-exits without fetching.
+**Settings → Devices → Link Desktop Device**. There is no phone number and no SMS
+code. The command authorizes the `SESSION` file and exits without fetching.
+
+If the account has two-step verification, Telegram accepts the scan and then asks
+for the cloud password (`SESSION_PASSWORD_NEEDED`). `giftfetch` takes it from
+`TG_PASSWORD` when that is set; otherwise it prompts on the terminal without
+echoing, or reads the first line of stdin when stdin is not a terminal. There is
+deliberately no flag for it: command-line arguments are visible to other users
+through `ps` and stay in shell history. The password is sent exactly as given,
+including any leading or trailing spaces.
 
 Two details that matter when you are driving this from a script or a headless
 box:
