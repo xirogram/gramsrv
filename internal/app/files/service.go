@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -416,6 +417,12 @@ func (s *Service) GetFile(ctx context.Context, req domain.FileDownloadRequest) (
 			if err != nil {
 				return blobMetaResult{}, err
 			}
+			if !found {
+				b, found, err = s.fallbackFileBlob(ctx, req.LocationKey)
+				if err != nil {
+					return blobMetaResult{}, err
+				}
+			}
 			if found {
 				s.blobCache.put(req.LocationKey, b)
 			}
@@ -550,6 +557,93 @@ func (s *Service) ReadImmutableFileRange(ctx context.Context, source domain.Immu
 		return nil, fmt.Errorf("immutable blob range digest mismatch")
 	}
 	return data, nil
+}
+
+func (s *Service) fallbackFileBlob(ctx context.Context, locationKey string) (domain.FileBlob, bool, error) {
+	if s == nil || s.media == nil {
+		return domain.FileBlob{}, false, nil
+	}
+	// photo:<id>:<size>
+	if strings.HasPrefix(locationKey, "photo:") {
+		parts := strings.Split(locationKey, ":")
+		if len(parts) >= 2 {
+			photoID := parts[1]
+			reqSize := ""
+			if len(parts) >= 3 {
+				reqSize = parts[2]
+			}
+			var candidates []string
+			switch reqSize {
+			case "s", "m", "a":
+				candidates = []string{"m", "s", "a", "x", "c", "y", "u"}
+			case "x", "y", "c", "w", "d":
+				candidates = []string{"x", "y", "c", "m", "s", "a", "u"}
+			default:
+				candidates = []string{"x", "m", "c", "a", "s", "y", "u"}
+			}
+			keys := make([]string, 0, len(candidates))
+			for _, c := range candidates {
+				if c != reqSize {
+					keys = append(keys, fmt.Sprintf("photo:%s:%s", photoID, c))
+				}
+			}
+			if batchStore, ok := s.media.(interface {
+				GetFileBlobs(context.Context, []string) (map[string]domain.FileBlob, error)
+			}); ok {
+				blobs, err := batchStore.GetFileBlobs(ctx, keys)
+				if err != nil {
+					return domain.FileBlob{}, false, err
+				}
+				for _, k := range keys {
+					if b, exists := blobs[k]; exists {
+						return b, true, nil
+					}
+				}
+			} else {
+				for _, k := range keys {
+					if b, exists, err := s.media.GetFileBlob(ctx, k); err == nil && exists {
+						return b, true, nil
+					}
+				}
+			}
+		}
+	}
+	// doc:<id>:<size>
+	if strings.HasPrefix(locationKey, "doc:") {
+		parts := strings.Split(locationKey, ":")
+		if len(parts) == 3 {
+			docID := parts[1]
+			keys := []string{
+				fmt.Sprintf("doc:%s", docID),
+				fmt.Sprintf("doc:%s:m", docID),
+				fmt.Sprintf("doc:%s:s", docID),
+			}
+			if batchStore, ok := s.media.(interface {
+				GetFileBlobs(context.Context, []string) (map[string]domain.FileBlob, error)
+			}); ok {
+				blobs, err := batchStore.GetFileBlobs(ctx, keys)
+				if err != nil {
+					return domain.FileBlob{}, false, err
+				}
+				for _, k := range keys {
+					if k != locationKey {
+						if b, exists := blobs[k]; exists {
+							return b, true, nil
+						}
+					}
+				}
+			} else {
+				for _, k := range keys {
+					if k != locationKey {
+						if b, exists, err := s.media.GetFileBlob(ctx, k); err == nil && exists {
+							return b, true, nil
+						}
+					}
+				}
+			}
+		}
+	}
+	return domain.FileBlob{}, false, nil
 }
 
 func (s *Service) logGetFileCache(req domain.FileDownloadRequest, blob domain.FileBlob, found bool, chunk domain.FileChunk, cacheLog getFileCacheLog, err error) {

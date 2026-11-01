@@ -199,3 +199,38 @@ func TestFileLocationKeyRejectsUnknownLegacyLocations(t *testing.T) {
 		}
 	}
 }
+
+func TestUploadGetFileResolvesInputStickerSetThumb(t *testing.T) {
+	files := &fakeFiles{
+		getFileFound: true,
+		getFileChunk: domain.FileChunk{Bytes: []byte("thumb bytes")},
+		sets: map[domain.StickerSetKind][]domain.StickerSet{
+			domain.StickerSetKindStickers: {
+				{
+					ID:              123,
+					AccessHash:      456,
+					ShortName:       "testpack",
+					ThumbDocumentID: 789,
+				},
+			},
+		},
+	}
+	r := &Router{deps: Deps{Files: files}}
+	res, err := r.onUploadGetFile(context.Background(), &tg.UploadGetFileRequest{
+		Location: &tg.InputStickerSetThumb{
+			Stickerset: &tg.InputStickerSetID{ID: 123, AccessHash: 456},
+		},
+		Limit: 1024,
+	})
+	if err != nil {
+		t.Fatalf("onUploadGetFile(InputStickerSetThumb) failed: %v", err)
+	}
+	if files.getFileRequest.LocationKey != "doc:789" {
+		t.Fatalf("location key = %q, want doc:789", files.getFileRequest.LocationKey)
+	}
+	file, ok := res.(*tg.UploadFile)
+	if !ok || string(file.Bytes) != "thumb bytes" {
+		t.Fatalf("unexpected res: %+v", res)
+	}
+}
+

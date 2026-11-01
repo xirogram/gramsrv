@@ -163,6 +163,37 @@ func (r *Router) onUploadGetFile(ctx context.Context, req *tg.UploadGetFileReque
 func (r *Router) authorizedFileLocationKey(ctx context.Context, location tg.InputFileLocationClass) (string, bool, error) {
 	loc, encrypted := location.(*tg.InputEncryptedFileLocation)
 	if !encrypted {
+		if peerLoc, ok := location.(*tg.InputPeerPhotoFileLocation); ok && peerLoc.PhotoID == 0 && peerLoc.Peer != nil {
+			photoID, err := r.resolvePeerPhotoID(ctx, peerLoc.Peer)
+			if err != nil {
+				return "", false, err
+			}
+			if photoID != 0 {
+				size := "a"
+				if peerLoc.Big {
+					size = "c"
+				}
+				return fmt.Sprintf("photo:%d:%s", photoID, size), true, nil
+			}
+		}
+		if peerLegacy, ok := location.(*tg.InputPeerPhotoFileLocationLegacy); ok && peerLegacy.VolumeID == 0 && peerLegacy.Peer != nil {
+			photoID, err := r.resolvePeerPhotoID(ctx, peerLegacy.Peer)
+			if err != nil {
+				return "", false, err
+			}
+			if photoID != 0 {
+				size := "a"
+				if peerLegacy.Big {
+					size = "c"
+				}
+				return fmt.Sprintf("photo:%d:%s", photoID, size), true, nil
+			}
+		}
+		if thumbLoc, ok := location.(*tg.InputStickerSetThumb); ok && thumbLoc.Stickerset != nil {
+			if key, ok := r.resolveStickerSetThumbKey(ctx, thumbLoc.Stickerset); ok {
+				return key, true, nil
+			}
+		}
 		key, ok := fileLocationKey(location)
 		return key, ok, nil
 	}
@@ -254,10 +285,14 @@ func fileLocationKey(location tg.InputFileLocationClass) (string, bool) {
 		}
 		return fmt.Sprintf("doc:%d:%s", loc.ID, loc.ThumbSize), true
 	case *tg.InputPhotoFileLocation:
-		if loc.ID == 0 || loc.ThumbSize == "" {
+		if loc.ID == 0 {
 			return "", false
 		}
-		return fmt.Sprintf("photo:%d:%s", loc.ID, loc.ThumbSize), true
+		thumbSize := loc.ThumbSize
+		if thumbSize == "" {
+			thumbSize = "x"
+		}
+		return fmt.Sprintf("photo:%d:%s", loc.ID, thumbSize), true
 	case *tg.InputPeerPhotoFileLocation:
 		if loc.PhotoID == 0 {
 			return "", false
@@ -398,3 +433,76 @@ func fileSaveErr(err error) error {
 		return internalErr()
 	}
 }
+
+func (r *Router) resolvePeerPhotoID(ctx context.Context, peer tg.InputPeerClass) (int64, error) {
+	userID, ok, err := r.currentUserID(ctx)
+	if err != nil || !ok || userID == 0 {
+		return 0, err
+	}
+	if view, isCommunity, err := r.maybeCommunityFromInputPeer(ctx, userID, peer); isCommunity {
+		if err != nil {
+			return 0, err
+		}
+		return view.Community.PhotoID, nil
+	}
+	if ref, ok := inputPeerChannelRef(peer); ok && r.deps.Channels != nil {
+		view, err := r.resolveInputPeerChannelView(ctx, userID, peer, ref.ID)
+		if err != nil {
+			return 0, err
+		}
+		return view.Channel.PhotoID, nil
+	}
+	if chatRef, ok := peer.(*tg.InputPeerChat); ok && chatRef.ChatID > 0 && r.deps.Channels != nil {
+		view, err := r.resolveInputPeerChannelView(ctx, userID, peer, chatRef.ChatID)
+		if err != nil {
+			return 0, err
+		}
+		return view.Channel.PhotoID, nil
+	}
+	if userRef, ok := peer.(*tg.InputPeerUser); ok && r.deps.Users != nil {
+		if u, found, err := r.deps.Users.ByID(ctx, userID, userRef.UserID); err == nil && found {
+			return u.PhotoID, nil
+		}
+	}
+	if ufm, ok := peer.(*tg.InputPeerUserFromMessage); ok && ufm.UserID > 0 && r.deps.Users != nil {
+		if u, found, err := r.deps.Users.ByID(ctx, userID, ufm.UserID); err == nil && found {
+			return u.PhotoID, nil
+		}
+	}
+	if cfm, ok := peer.(*tg.InputPeerChannelFromMessage); ok && cfm.ChannelID > 0 && r.deps.Channels != nil {
+		view, err := r.resolveInputPeerChannelView(ctx, userID, peer, cfm.ChannelID)
+		if err != nil {
+			return 0, err
+		}
+		return view.Channel.PhotoID, nil
+	}
+	if _, ok := peer.(*tg.InputPeerSelf); ok && r.deps.Users != nil {
+		if self, err := r.deps.Users.Self(ctx, userID); err == nil {
+			return self.PhotoID, nil
+		}
+	}
+	return 0, nil
+}
+
+func (r *Router) resolveStickerSetThumbKey(ctx context.Context, input tg.InputStickerSetClass) (string, bool) {
+	if input == nil || r.deps.Files == nil {
+		return "", false
+	}
+	ref, ok := stickerSetRefFromInput(input)
+	if !ok {
+		return "", false
+	}
+	set, docs, found, err := r.deps.Files.ResolveStickerSet(ctx, ref)
+	if err != nil || !found || set.ID == 0 {
+		return "", false
+	}
+	thumbDocID := set.ThumbDocumentID
+	if thumbDocID == 0 && len(docs) > 0 {
+		thumbDocID = docs[0].ID
+	}
+	if thumbDocID == 0 {
+		return "", false
+	}
+	return fmt.Sprintf("doc:%d", thumbDocID), true
+}
+
