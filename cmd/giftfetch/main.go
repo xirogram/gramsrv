@@ -24,6 +24,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/url"
 	"os"
@@ -43,6 +44,7 @@ import (
 	"github.com/iamxvbaba/td/tgerr"
 	"golang.org/x/net/proxy"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/term"
 	"rsc.io/qr"
 
 	"telesrv/internal/app/stargifts"
@@ -217,7 +219,6 @@ func main() {
 	reuseMetadata := flag.Bool("reuse-metadata", false, "reuse and strictly decode catalog.tl plus upgrade-attributes/*.tl instead of refetching metadata")
 	allowedMissingThumbsRaw := flag.String("allow-missing-thumb", "", "comma-separated document_id:photo|video:type entries that may be recorded as explicitly missing after a failed download")
 	loginQR := flag.Bool("login-qr", false, "authorize the SESSION file through a QR login and exit without fetching (Telegram -> Settings -> Devices -> Link Desktop Device)")
-	loginPassword := flag.String("password", "", "2FA cloud password if two-step verification is enabled (or use PASSWORD / TG_PASSWORD env)")
 	qrPNG := flag.String("qr-png", "", "also write each rotated QR login token as a PNG to this path (default: <session>.qr.png)")
 	flag.Parse()
 
@@ -239,7 +240,7 @@ func main() {
 		dispatcher := tg.NewUpdateDispatcher()
 		opts.UpdateHandler = dispatcher
 		run(defaultLoginTimeout, opts, func(ctx context.Context, client *telegram.Client) error {
-			return loginQRToken(ctx, client, dispatcher, qrPNGPath(session, *qrPNG), *loginPassword)
+			return loginQRToken(ctx, client, dispatcher, qrPNGPath(session, *qrPNG))
 		})
 		return
 	}
@@ -293,7 +294,8 @@ func run(timeout time.Duration, opts telegram.Options, fn func(context.Context, 
 
 // loginQRToken trades a QR login for an authorized user session and persists it to SESSION.
 // No phone number or SMS code is needed: just scan the QR code printed by show from a logged-in Telegram.
-func loginQRToken(ctx context.Context, client *telegram.Client, dispatcher tg.UpdateDispatcher, pngPath, explicitPassword string) error {
+// An account with two-step verification also needs its cloud password; see resolvePassword.
+func loginQRToken(ctx context.Context, client *telegram.Client, dispatcher tg.UpdateDispatcher, pngPath string) error {
 	status, err := client.Auth().Status(ctx)
 	if err != nil {
 		return fmt.Errorf("auth status: %w", err)
@@ -309,20 +311,20 @@ func loginQRToken(ctx context.Context, client *telegram.Client, dispatcher tg.Up
 		fmt.Println("[qr] scan in Telegram -> Settings -> Devices -> Link Desktop Device")
 		return showLoginQR(token.URL(), pngPath)
 	})
-	if err != nil {
-		if tgerr.Is(err, "SESSION_PASSWORD_NEEDED") || strings.Contains(err.Error(), "SESSION_PASSWORD_NEEDED") {
-			fmt.Println("[2fa] two-step verification password is required")
-			pass, passErr := resolvePassword(explicitPassword)
-			if passErr != nil {
-				return fmt.Errorf("resolve 2fa password: %w", passErr)
-			}
-			authorization, err = client.Auth().Password(ctx, pass)
-			if err != nil {
-				return fmt.Errorf("2fa password check: %w", err)
-			}
-		} else {
-			return fmt.Errorf("qr login: %w", err)
+	if tgerr.Is(err, "SESSION_PASSWORD_NEEDED") {
+		// The scan was accepted, but the account has two-step verification:
+		// auth.checkPassword finishes the login on the same connection.
+		fmt.Println("[2fa] two-step verification password is required")
+		pass, passErr := resolvePassword()
+		if passErr != nil {
+			return fmt.Errorf("resolve 2fa password: %w", passErr)
 		}
+		authorization, err = client.Auth().Password(ctx, pass)
+		if err != nil {
+			return fmt.Errorf("2fa password check: %w", err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("qr login: %w", err)
 	}
 	user, ok := authorization.User.AsNotEmpty()
 	if !ok {
@@ -332,22 +334,37 @@ func loginQRToken(ctx context.Context, client *telegram.Client, dispatcher tg.Up
 	return nil
 }
 
-func resolvePassword(flagVal string) (string, error) {
-	if flagVal = strings.TrimSpace(flagVal); flagVal != "" {
-		return flagVal, nil
+// resolvePassword returns the 2FA cloud password: TG_PASSWORD when set, otherwise a
+// prompt that does not echo on a terminal, or the first line of piped stdin. The password
+// is never taken from a flag, because arguments are visible to other users through ps.
+// It is used exactly as given (a cloud password may start or end with spaces); only the
+// line terminator of a piped line is removed.
+func resolvePassword() (string, error) {
+	if pass := os.Getenv("TG_PASSWORD"); pass != "" {
+		return pass, nil
 	}
-	for _, envKey := range []string{"TG_PASSWORD", "TG_2FA_PASSWORD", "PASSWORD"} {
-		if val := strings.TrimSpace(os.Getenv(envKey)); val != "" {
-			return val, nil
+	fd := int(os.Stdin.Fd())
+	if term.IsTerminal(fd) {
+		fmt.Fprint(os.Stderr, "Enter 2FA cloud password: ")
+		pass, err := term.ReadPassword(fd)
+		fmt.Fprintln(os.Stderr)
+		if err != nil {
+			return "", fmt.Errorf("read password: %w", err)
 		}
+		if len(pass) == 0 {
+			return "", errors.New("empty 2FA password")
+		}
+		return string(pass), nil
 	}
-	fmt.Print("Enter 2FA cloud password: ")
-	reader := bufio.NewReader(os.Stdin)
-	line, err := reader.ReadString('\n')
-	if err != nil && len(line) == 0 {
-		return "", errors.New("2FA password required but stdin is closed")
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", fmt.Errorf("read password from stdin: %w", err)
 	}
-	return strings.TrimSpace(line), nil
+	pass := strings.TrimSuffix(strings.TrimSuffix(line, "\n"), "\r")
+	if pass == "" {
+		return "", errors.New("2FA password required: set TG_PASSWORD, or run in a terminal or pipe it on stdin")
+	}
+	return pass, nil
 }
 
 // qrPNGPath decides where the QR PNG is written: by default the SESSION name plus a suffix.
