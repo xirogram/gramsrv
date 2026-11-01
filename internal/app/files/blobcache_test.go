@@ -606,3 +606,60 @@ func TestStickerSetCacheRejectsConcurrentStaleLoads(t *testing.T) {
 		}
 	}
 }
+
+func TestGetFileFallbackForPhotoAndDocument(t *testing.T) {
+	ctx := context.Background()
+	media := newFakeMediaStore()
+	blobs, err := NewLocalFS(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(media, blobs, 2)
+
+	// 1. Photo fallback: store only photo:101:m. Request photo:101:s.
+	photoKey, err := blobs.Put(ctx, []byte("photo image bytes"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := media.PutFileBlob(ctx, domain.FileBlob{
+		LocationKey: "photo:101:m",
+		Backend:     domain.MediaBackendLocalFS,
+		ObjectKey:   photoKey,
+		Size:        int64(len("photo image bytes")),
+		MimeType:    "image/jpeg",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	chunk, found, err := svc.GetFile(ctx, domain.FileDownloadRequest{LocationKey: "photo:101:s", Limit: 1024})
+	if err != nil || !found {
+		t.Fatalf("GetFile(photo:101:s) found=%v err=%v", found, err)
+	}
+	if string(chunk.Bytes) != "photo image bytes" {
+		t.Fatalf("GetFile(photo:101:s) got %q", string(chunk.Bytes))
+	}
+
+	// 2. Document/Sticker fallback: store only doc:202. Request doc:202:m.
+	docKey, err := blobs.Put(ctx, []byte("sticker bytes"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := media.PutFileBlob(ctx, domain.FileBlob{
+		LocationKey: "doc:202",
+		Backend:     domain.MediaBackendLocalFS,
+		ObjectKey:   docKey,
+		Size:        int64(len("sticker bytes")),
+		MimeType:    "application/x-tgsticker",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	docChunk, found, err := svc.GetFile(ctx, domain.FileDownloadRequest{LocationKey: "doc:202:m", Limit: 1024})
+	if err != nil || !found {
+		t.Fatalf("GetFile(doc:202:m) found=%v err=%v", found, err)
+	}
+	if string(docChunk.Bytes) != "sticker bytes" {
+		t.Fatalf("GetFile(doc:202:m) got %q", string(docChunk.Bytes))
+	}
+}
+
