@@ -119,7 +119,7 @@ func TestDetectEnvDriftIgnoresNonFieldLines(t *testing.T) {
 	// not be treated as field keys.
 	cfgPath, examplePath := writeDriftFiles(t,
 		"## Server & Network -- Where the server listens\n"+
-			"# a plain comment without a key\n"+
+			"# это просто комментарий без ключа\n"+
 			"# =====\n"+
 			"POSTGRES_PASSWORD=irrelevant\n"+
 			"TELESRV_LISTEN=127.0.0.1:2398\n",

@@ -94,6 +94,10 @@ var allowedPaths = []string{
 	"internal/domain/gif_catalog_test.go",                        // GIF keyword test data
 	"internal/domain/moderation_warning_test.go",                 // Russian moderation fixtures
 	"internal/giftclaim/http.go",                                 // user-facing Russian HTML UI
+	"internal/giftclaim/service.go",                              // user-facing Russian claim-page errors
+	"internal/rpc/bot_invoice.go",                                // user-facing Russian pay-button label
+	"internal/app/langpack/service_test.go",                      // zh-hans language-pack test data
+	"internal/config/drift_test.go",                              // non-ASCII .env comment test data
 	"internal/translation/",                                      // this guard carries script samples in its own comments
 }
 

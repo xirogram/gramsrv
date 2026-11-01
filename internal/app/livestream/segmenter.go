@@ -60,7 +60,7 @@ type stream struct {
 //     segment (video+audio+TS overhead) >128KiB is silently truncated, causing artifacts.
 //     So the unified single quality must stay under ~1Mbps — target ~640kbps here: video 480k
 //     (maxrate/bufsize=480k tightened to per-second VBV, preventing keyframe-segment bursts)
-//     + audio 64k, and lower to 640x360/24fps for extra headroom;
+//     plus audio 64k, and lower to 640x360/24fps for extra headroom;
 //   - Output a self-contained mp4 (each segment has its own moov and can be
 //     avformat_open_input'd independently). ⚠ MPEG-TS cannot be used: TDesktop's trimmed
 //     ffmpeg demuxer whitelist only has mov/mp4-family demuxers
