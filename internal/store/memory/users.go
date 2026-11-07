@@ -14,6 +14,7 @@ import (
 // UserStore is the in-memory implementation of store.UserStore. Its ID uses the same business starting point as the PG identity.
 type UserStore struct {
 	mu               sync.RWMutex
+	customLabels     map[int64]string
 	byID             map[int64]domain.User
 	nextID           int64
 	usernameRegistry *CollectibleUsernameStore

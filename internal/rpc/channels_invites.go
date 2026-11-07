@@ -78,7 +78,7 @@ func (r *Router) onMessagesCheckChatInvite(ctx context.Context, hash string) (tg
 		// preview is all a non-member gets (see the flag comment below).
 		About:             domain.ModerationProfileWarning(res.Channel.Scam, res.Channel.Fake, res.Channel.About),
 		Photo:             &tg.PhotoEmpty{},
-		ParticipantsCount: res.Channel.ParticipantsCount,
+		ParticipantsCount: res.Channel.EffectiveParticipantsCount(),
 	}
 	// chatInvite#5c9d3702 carries verified:flags.7 / scam:flags.8 / fake:flags.9.
 	// A non-member sees only this preview, so the peer's moderation and official

@@ -117,6 +117,7 @@ func NewService(users store.UserStore, opts ...Option) *Service {
 		userprojection.WithPrivacyEvaluator(s.privacy),
 		userprojection.WithAccountFreezeProvider(s.freezes),
 		userprojection.WithCollectiblePhoneProvider(s.phoneProjection),
+		userprojection.WithCustomLabelProvider(s.users),
 	)
 	return s
 }
@@ -569,6 +570,20 @@ func (s *Service) SetScamFake(ctx context.Context, userID int64, scam, fake bool
 		return u, nil
 	}
 	updated, err := s.users.SetScamFake(ctx, userID, scam, fake)
+	if err != nil {
+		return domain.User{}, err
+	}
+	s.refreshCachedUsers(ctx, updated)
+	return updated, nil
+}
+
+// SetCustomLabel sets/clears the operator custom label ("scam"-like chip with free-form text),
+// refreshing the base-user cache so projections pick the restriction reason immediately.
+func (s *Service) SetCustomLabel(ctx context.Context, userID int64, label string) (domain.User, error) {
+	if userID == 0 {
+		return domain.User{}, ErrNotAuthorized
+	}
+	updated, err := s.users.SetCustomLabel(ctx, userID, label)
 	if err != nil {
 		return domain.User{}, err
 	}

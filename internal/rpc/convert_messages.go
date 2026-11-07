@@ -830,7 +830,7 @@ func tgMigratedLegacyChat(viewerUserID int64, ch domain.Channel, self *domain.Ch
 		ID:                ch.ID,
 		Title:             ch.Title,
 		Photo:             tgChatPhoto(ch),
-		ParticipantsCount: ch.ParticipantsCount,
+		ParticipantsCount: ch.EffectiveParticipantsCount(),
 		Date:              ch.Date,
 		Version:           ch.Pts,
 	}

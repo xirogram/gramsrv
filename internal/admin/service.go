@@ -38,6 +38,7 @@ const (
 	ActionDebitStars              = "account.debit_stars"
 	ActionSetVerified             = "account.set_verified"
 	ActionSetUserFlags            = "account.set_flags"
+	ActionSetCustomLabel          = "account.set_custom_label"
 	ActionSetSupport              = "account.set_support"
 	ActionSetUsername             = "account.set_username"
 	ActionSetProfile              = "account.set_profile"
@@ -235,6 +236,7 @@ type UsersService interface {
 	GrantPremium(ctx context.Context, userID int64, months int) (domain.User, error)
 	SetVerified(ctx context.Context, userID int64, verified bool) (domain.User, error)
 	SetScamFake(ctx context.Context, userID int64, scam, fake bool) (domain.User, error)
+	SetCustomLabel(ctx context.Context, userID int64, label string) (domain.User, error)
 	SetSupport(ctx context.Context, userID int64, support bool) (domain.User, error)
 	UpdateUsername(ctx context.Context, userID int64, username string) (domain.User, error)
 	UpdateColor(ctx context.Context, userID int64, forProfile bool, color domain.PeerColor) (domain.User, error)
@@ -1093,6 +1095,12 @@ type SetUserFlagsRequest struct {
 	UserID int64 `json:"user_id"`
 	Scam   bool  `json:"scam"`
 	Fake   bool  `json:"fake"`
+}
+
+type SetCustomLabelRequest struct {
+	CommandMeta
+	UserID int64  `json:"user_id"`
+	Label  string `json:"label"`
 }
 
 type SetChannelFlagsRequest struct {
@@ -2092,6 +2100,44 @@ func (s *Service) SetUserFlags(ctx context.Context, req SetUserFlagsRequest) (Co
 			details["notify_error"] = err.Error()
 		}
 		return CommandResult{Message: "user flags updated", Details: details}, nil
+	})
+}
+
+// SetCustomLabel sets or clears the operator custom label ("scam"-style chip
+// with free-form text). An empty label clears the chip.
+func (s *Service) SetCustomLabel(ctx context.Context, req SetCustomLabelRequest) (CommandResult, error) {
+	if req.UserID <= 0 {
+		return CommandResult{}, fmt.Errorf("user_id is required")
+	}
+	if s == nil || s.users == nil {
+		return CommandResult{}, fmt.Errorf("admin user dependency is not configured")
+	}
+	label := strings.TrimSpace(req.Label)
+	if utf8.RuneCountInString(label) > 24 {
+		return CommandResult{}, fmt.Errorf("label too long (max 24 runes)")
+	}
+	return s.runCommand(ctx, req.CommandMeta, ActionSetCustomLabel, req.UserID, domain.Peer{}, req, func() (CommandResult, error) {
+		_, found, err := s.users.AdminUser(ctx, req.UserID)
+		if err != nil {
+			return CommandResult{}, err
+		}
+		if !found {
+			return CommandResult{}, domain.ErrUserNotFound
+		}
+		if req.DryRun {
+			return CommandResult{Message: "dry-run completed", Details: map[string]any{
+				"new_label": label,
+			}}, nil
+		}
+		updated, err := s.users.SetCustomLabel(ctx, req.UserID, label)
+		if err != nil {
+			return CommandResult{}, err
+		}
+		details := map[string]any{"updated_label": label}
+		if err := s.notifyUserModerationFlagsChanged(ctx, updated); err != nil {
+			details["notify_error"] = err.Error()
+		}
+		return CommandResult{Message: "custom label updated", Details: details}, nil
 	})
 }
 

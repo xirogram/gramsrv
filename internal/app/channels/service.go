@@ -607,6 +607,38 @@ func (s *Service) SetScamFake(ctx context.Context, channelID int64, scam, fake b
 	return s.channels.SetChannelScamFake(ctx, channelID, scam, fake)
 }
 
+// SetFakeParticipants sets the visually displayed participant count of a channel/supergroup.
+func (s *Service) SetFakeParticipants(ctx context.Context, channelID int64, count int) (domain.Channel, error) {
+	if s == nil || s.channels == nil || channelID == 0 {
+		return domain.Channel{}, domain.ErrChannelInvalid
+	}
+	return s.channels.SetChannelFakeParticipants(ctx, channelID, count)
+}
+
+// SetFakeMessageViews sets the visually displayed views counter of a channel post.
+func (s *Service) SetFakeMessageViews(ctx context.Context, channelID int64, messageID int, views int) (int, error) {
+	if s == nil || s.channels == nil || channelID == 0 {
+		return 0, domain.ErrChannelInvalid
+	}
+	return s.channels.SetChannelFakeMessageViews(ctx, channelID, messageID, views)
+}
+
+// SetFakeMessageReactions injects the displayed reaction counters of a channel post.
+func (s *Service) SetFakeMessageReactions(ctx context.Context, channelID int64, messageID int, counts map[string]int) (map[string]int, error) {
+	if s == nil || s.channels == nil || channelID == 0 {
+		return nil, domain.ErrChannelInvalid
+	}
+	return s.channels.SetChannelFakeMessageReactions(ctx, channelID, messageID, counts)
+}
+
+// ResolveChannelByUsername returns the channel ID registered under a username.
+func (s *Service) ResolveChannelByUsername(ctx context.Context, username string) (int64, error) {
+	if s == nil || s.channels == nil {
+		return 0, domain.ErrChannelInvalid
+	}
+	return s.channels.ChannelIDByUsername(ctx, username)
+}
+
 // AdminSetSettings applies a moderation-settings patch through the admin path (no permission checks).
 func (s *Service) AdminSetSettings(ctx context.Context, channelID int64, patch domain.ChannelAdminSettings) (domain.Channel, error) {
 	if s == nil || s.channels == nil || channelID == 0 {

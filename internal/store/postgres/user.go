@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -1044,4 +1046,96 @@ func peerColorFromModel(hasColor bool, color int32, backgroundEmojiID int64) dom
 		Color:             int(color),
 		BackgroundEmojiID: backgroundEmojiID,
 	}
+}
+
+
+// SetCustomLabel sets or clears the operator-visible custom label of a user
+// (like scam/fake, but the label text is free-form). Empty label clears it.
+func (s *UserStore) SetCustomLabel(ctx context.Context, userID int64, label string) (domain.User, error) {
+	label = strings.TrimSpace(label)
+	if utf8.RuneCountInString(label) > 24 {
+		return domain.User{}, fmt.Errorf("custom label too long")
+	}
+	beginner, ok := s.db.(txBeginner)
+	if !ok {
+		return domain.User{}, fmt.Errorf("set custom label: db does not support transactions")
+	}
+	tx, err := beginner.Begin(ctx)
+	if err != nil {
+		return domain.User{}, fmt.Errorf("begin set custom label: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	var current string
+	if err := tx.QueryRow(ctx, `SELECT custom_label FROM users WHERE id = $1 FOR UPDATE`, userID).Scan(&current); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.User{}, domain.ErrUserNotFound
+		}
+		return domain.User{}, fmt.Errorf("lock user custom label: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `UPDATE users SET custom_label = $2 WHERE id = $1`, userID, label); err != nil {
+		return domain.User{}, fmt.Errorf("update custom label: %w", err)
+	}
+	row, err := s.q.WithTx(tx).GetUserByID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.User{}, domain.ErrUserNotFound
+		}
+		return domain.User{}, fmt.Errorf("reload user after custom label: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.User{}, fmt.Errorf("commit custom label: %w", err)
+	}
+	committed = true
+	return userFromModel(row), nil
+}
+
+// CustomLabels batches the current custom labels for the given user IDs.
+// Missing rows and empty labels are omitted from the result.
+func (s *UserStore) CustomLabels(ctx context.Context, userIDs []int64) (map[int64]string, error) {
+	out := map[int64]string{}
+	if len(userIDs) == 0 {
+		return out, nil
+	}
+	rows, err := s.db.(pgxRawQuerier).Query(ctx, customLabelsSelect(userIDs))
+	if err != nil {
+		return nil, fmt.Errorf("query custom labels: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var (
+			id    int64
+			label string
+		)
+		if err := rows.Scan(&id, &label); err != nil {
+			return nil, fmt.Errorf("scan custom label: %w", err)
+		}
+		out[id] = label
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate custom labels: %w", err)
+	}
+	return out, nil
+}
+
+// pgxRawQuerier is implemented by both pgxpool.Pool and pgx.Tx, enabling
+// hand-written ad-hoc SQL without generated queries.
+type pgxRawQuerier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
+// customLabelsSelect builds SETOF (id, custom_label) without relying on a
+// generated query (the label column is owned by hand-written store methods).
+func customLabelsSelect(userIDs []int64) string {
+	ids := make([]string, 0, len(userIDs))
+	for _, id := range userIDs {
+		ids = append(ids, strconv.FormatInt(id, 10))
+	}
+	return `SELECT u.id, u.custom_label FROM users u
+WHERE u.custom_label <> '' AND u.id IN (` + strings.Join(ids, ",") + `)`
 }

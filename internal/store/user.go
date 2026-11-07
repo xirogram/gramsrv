@@ -28,6 +28,10 @@ type UserStore interface {
 	SetVerified(ctx context.Context, userID int64, verified bool) (domain.User, error)
 	// SetScamFake sets/clears the user's scam and fake flags (bots reuse the same path).
 	SetScamFake(ctx context.Context, userID int64, scam, fake bool) (domain.User, error)
+	// SetCustomLabel sets/clears the operator custom label ("scam"-like chip with free-form text).
+	SetCustomLabel(ctx context.Context, userID int64, label string) (domain.User, error)
+	// CustomLabels batches operator custom labels; missing rows and empty labels are omitted.
+	CustomLabels(ctx context.Context, userIDs []int64) (map[int64]string, error)
 	// SetSupport sets/clears the user's support flag (official support account).
 	SetSupport(ctx context.Context, userID int64, support bool) (domain.User, error)
 	// SweepExpiredPremium clears expired (premium_expires_at <= now) Premium rows and returns

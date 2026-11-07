@@ -399,6 +399,9 @@ func (r *Router) pushLoginTokenAccepted(ctx context.Context, target loginTokenTa
 // and sentCodeTypeEmailCode is returned (the client then enters the "enter the email code" screen
 // and later completes login via auth.signIn's email_verification).
 func (r *Router) onAuthSendCode(ctx context.Context, req *tg.AuthSendCodeRequest) (tg.AuthSentCodeClass, error) {
+	if r.authBanBlocked(ctx, req.PhoneNumber) {
+		return nil, phoneNumberInvalidErr()
+	}
 	if err := r.checkAuthCodeRateLimit(ctx, req.PhoneNumber); err != nil {
 		return nil, err
 	}
@@ -546,6 +549,9 @@ func (r *Router) tgSentCodeForHash(ctx context.Context, hash string) (tg.AuthSen
 // the user does not exist. With email_verification it takes the login-email path (the code comes
 // from the email rather than SMS).
 func (r *Router) onAuthSignIn(ctx context.Context, req *tg.AuthSignInRequest) (tg.AuthAuthorizationClass, error) {
+	if r.authBanBlocked(ctx, req.PhoneNumber) {
+		return nil, phoneNumberInvalidErr()
+	}
 	var (
 		u          domain.User
 		needSignUp bool
@@ -585,6 +591,9 @@ func (r *Router) finishAuthSignIn(ctx context.Context, u domain.User, needSignUp
 }
 
 func (r *Router) onAuthResendCode(ctx context.Context, req *tg.AuthResendCodeRequest) (tg.AuthSentCodeClass, error) {
+	if r.authBanBlocked(ctx, req.PhoneNumber) {
+		return nil, phoneNumberInvalidErr()
+	}
 	if err := r.checkAuthCodeRateLimit(ctx, req.PhoneNumber); err != nil {
 		return nil, err
 	}
@@ -904,6 +913,9 @@ func (r *Router) onAuthImportBotAuthorization(ctx context.Context, req *tg.AuthI
 
 // onAuthSignUp handles auth.signUp: creates the user and binds the authorization.
 func (r *Router) onAuthSignUp(ctx context.Context, req *tg.AuthSignUpRequest) (tg.AuthAuthorizationClass, error) {
+	if r.authBanBlocked(ctx, req.PhoneNumber) {
+		return nil, phoneNumberInvalidErr()
+	}
 	u, loginMessage, err := r.deps.Auth.SignUp(ctx, r.authzFromCtx(ctx), req.PhoneNumber, req.PhoneCodeHash, req.FirstName, req.LastName)
 	if err != nil {
 		return nil, signInErr(err)

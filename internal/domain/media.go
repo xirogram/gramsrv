@@ -1003,6 +1003,7 @@ type ProfilePhotoKind string
 const (
 	ProfilePhotoKindProfile  ProfilePhotoKind = "profile"
 	ProfilePhotoKindFallback ProfilePhotoKind = "fallback"
+	ProfilePhotoKindBanner   ProfilePhotoKind = "banner"
 )
 
 // ProfilePhotoRef is the minimal information needed to render an avatar (current profile/fallback/personal photo).

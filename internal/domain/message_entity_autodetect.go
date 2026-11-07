@@ -81,10 +81,14 @@ func detectMentionMessageEntities(message string) []MessageEntity {
 			continue
 		}
 		end := i + 1
-		for end < len(message) && automaticEntityUsernameByte(message[end]) {
-			end++
+		for end < len(message) {
+			r, sz := utf8.DecodeRuneInString(message[end:])
+			if r == utf8.RuneError || !automaticEntityUsernameRune(r) {
+				break
+			}
+			end += sz
 		}
-		if length := end - i - 1; length < 1 || length > 32 {
+		if length := utf8.RuneCountInString(message[i+1 : end]); length < 1 || length > 32 {
 			continue
 		}
 		out = append(out, MessageEntity{
@@ -237,8 +241,13 @@ func automaticEntityHashtagRune(r rune) bool {
 	return automaticEntityWordRune(r)
 }
 
+func automaticEntityUsernameRune(r rune) bool {
+	return r == '_' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') ||
+		(r >= 'а' && r <= 'я') || (r >= 'А' && r <= 'Я') || r == 'ё' || r == 'Ё'
+}
+
 func automaticEntityUsernameByte(b byte) bool {
-	return b == '_' || b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9'
+	return automaticEntityUsernameRune(rune(b))
 }
 
 func automaticEntityUTF16Length(text string) int {

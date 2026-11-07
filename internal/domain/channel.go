@@ -462,6 +462,7 @@ type Channel struct {
 	EmojiStatus         ChannelEmojiStatus
 	Wallpaper           *Wallpaper
 	ParticipantsCount   int
+	FakeParticipants    int
 	AdminsCount         int
 	KickedCount         int
 	BannedCount         int
@@ -2503,4 +2504,13 @@ type ChannelReadParticipantsResult struct {
 	Channel      Channel
 	Message      ChannelMessage
 	Participants []ChannelReadParticipant
+}
+
+// EffectiveParticipantsCount returns the visually displayed participant count:
+// the fake (admin-set) value when present, otherwise the real count.
+func (ch Channel) EffectiveParticipantsCount() int {
+	if ch.FakeParticipants > 0 {
+		return ch.FakeParticipants
+	}
+	return ch.ParticipantsCount
 }

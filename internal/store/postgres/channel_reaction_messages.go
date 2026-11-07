@@ -1059,3 +1059,68 @@ LIMIT $4`,
 		Channel: channel, Message: message, Reactions: reactions,
 	}, len(reactions) > 0, nil
 }
+
+// SetChannelFakeMessageReactions injects synthetic reactions so the post displays
+// the given total count per reaction kind (key "emoji:<value>" or
+// "custom_emoji:<docid>"; bare emoji implies "emoji:"). Synthetic reactors get huge
+// negative user IDs and an old date, so they never show up in "recent" lists.
+func (s *ChannelStore) SetChannelFakeMessageReactions(ctx context.Context, channelID int64, messageID int, counts map[string]int) (map[string]int, error) {
+	if channelID == 0 || messageID == 0 || len(counts) == 0 {
+		return nil, domain.ErrChannelInvalid
+	}
+	out := map[string]int{}
+	for kind, target := range counts {
+		if target < 0 {
+			target = 0
+		}
+		rtype, value := kind, kind
+		if idx := strings.Index(kind, ":"); idx >= 0 {
+			rtype = kind[:idx]
+			value = kind[idx+1:]
+		}
+		if rtype == "" || value == "" {
+			return nil, domain.ErrChannelInvalid
+		}
+		var current int
+		if err := s.db.QueryRow(ctx, `
+SELECT count(*) FROM channel_message_reactions
+WHERE channel_id = $1 AND message_id = $2 AND reaction_type = $3 AND reaction_value = $4`,
+			channelID, messageID, rtype, value).Scan(&current); err != nil {
+			return nil, fmt.Errorf("fake reactions count: %w", err)
+		}
+		delta := target - current
+		out[rtype+":"+value] = tgtTo(target, current)
+		if delta <= 0 {
+			continue
+		}
+		var maxFake int64
+		if err := s.db.QueryRow(ctx, `SELECT COALESCE(MAX(id), 900100000000) FROM users WHERE id >= 900100000000`).Scan(&maxFake); err != nil {
+			return nil, fmt.Errorf("fake reactions users: %w", err)
+		}
+		uidBase := maxFake + 1
+		uidTop := uidBase + int64(delta) - 1
+		stmt := []string{
+			"BEGIN;",
+			fmt.Sprintf(`INSERT INTO users (id, access_hash, phone, first_name, last_name, username, country_code, about, created_at, updated_at, verified, support, last_seen_at, default_history_ttl_period, is_bot, bot_info_version, emoji_status_document_id, emoji_status_until, color_set, color, color_background_emoji_id, profile_color_set, profile_color, profile_color_background_emoji_id, birthday_day, birthday_month, birthday_year, personal_channel_id, linked_community_id, scam, fake, deleted_at, deletion_source, deletion_reason, account_delete_at)
+SELECT s, 0, '', '', '', '', '', '', now(), now(), FALSE, FALSE, 0, 0, FALSE, 0, 0, 0, FALSE, 0, 0, FALSE, 0, 0, 0, 0, 0, 0, 0, FALSE, FALSE, now(), 'manual', '', NULL
+FROM generate_series(%d, %d) AS s ON CONFLICT (id) DO NOTHING;`, uidBase, uidTop),
+			fmt.Sprintf(`INSERT INTO channel_message_reactions (channel_id, message_id, reacted_user_id, sender_user_id, reaction_type, reaction_value, big, unread, chosen_order, reaction_date)
+SELECT %d, %d, s, s, %s, %s, FALSE, FALSE, 1, 1577836800
+FROM generate_series(%d, %d) AS s
+ON CONFLICT (channel_id, message_id, reacted_user_id, reaction_type, reaction_value) DO NOTHING;`,
+				channelID, messageID, pgQuote(rtype), pgQuote(value), uidBase, uidTop),
+			"COMMIT;",
+		}
+		stmt = append(stmt, "COMMIT;")
+		if _, err := s.db.Exec(ctx, strings.Join(stmt, "\n")); err != nil {
+			return nil, fmt.Errorf("insert fake reactions: %w", err)
+		}
+	}
+	return out, nil
+}
+
+func tgtTo(target, current int) int { return target }
+
+func pgQuote(s string) string {
+	return "'" + strings.ReplaceAll(strings.ReplaceAll(s, "\\", "\\\\"), "'", "''") + "'"
+}

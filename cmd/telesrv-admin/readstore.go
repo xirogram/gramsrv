@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -987,6 +988,21 @@ LIMIT $3`, beforeActiveUS, beforeID, limit+1)
 // offset scan over the pre-aggregated CTE is cheap even though offset
 // pagination over raw rows elsewhere in this file deliberately uses a keyset
 // cursor instead.
+// hiddenUserIDs returns accounts excluded from shared-device intersection
+// (env TELESRV_ADMIN_HIDDEN_USERS: comma-separated user ids).
+func hiddenUserIDs() []int64 {
+	var out []int64
+	raw := strings.TrimSpace(os.Getenv("TELESRV_ADMIN_HIDDEN_USERS"))
+	for _, p := range strings.Split(raw, ",") {
+		p = strings.TrimSpace(p)
+		v, err := strconv.ParseInt(p, 10, 64)
+		if err == nil && v > 0 {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
 func (s *readStore) ListSharedDeviceGroups(ctx context.Context, offset, limit int) ([]SharedDeviceGroup, bool, error) {
 	if limit <= 0 {
 		limit = accountListDefaultLimit
@@ -1004,6 +1020,7 @@ WITH device_groups AS (
 		max(active_at) AS last_active_at
 	FROM authorizations
 	WHERE device_model <> ''
+		AND NOT (user_id = ANY($3::bigint[]))
 	GROUP BY device_model, system_version, platform, ip
 	HAVING count(DISTINCT user_id) > 1
 	ORDER BY max(active_at) DESC, device_model, system_version, platform, ip
@@ -1024,7 +1041,7 @@ JOIN members m ON m.device_model = g.device_model AND m.system_version = g.syste
 	AND m.platform = g.platform AND m.ip = g.ip
 JOIN users u ON u.id = m.user_id
 ORDER BY g.last_active_at DESC, g.device_model, g.system_version, g.platform, g.ip, m.active_at DESC`,
-		limit+1, offset)
+		limit+1, offset, hiddenUserIDs())
 	if err != nil {
 		return nil, false, fmt.Errorf("list shared device groups: %w", err)
 	}

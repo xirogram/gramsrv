@@ -2,7 +2,9 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 
 	"telesrv/internal/domain"
 )
@@ -254,4 +256,27 @@ GROUP BY r.channel_id, r.root_id, cm.read_inbox_max_id`, channelIDs, rootIDs, vi
 		return nil, err
 	}
 	return out, nil
+}
+
+// SetChannelFakeMessageViews sets the visually displayed views count of a channel
+// post. max(new, old) semantics: never lowers the counter.
+func (s *ChannelStore) SetChannelFakeMessageViews(ctx context.Context, channelID int64, messageID int, views int) (int, error) {
+	if channelID == 0 || messageID == 0 {
+		return 0, domain.ErrChannelInvalid
+	}
+	if views < 0 {
+		views = 0
+	}
+	var final int
+	if err := s.db.QueryRow(ctx, `
+UPDATE channel_messages m
+SET views_count = GREATEST(m.views_count, $2), updated_at = now()
+WHERE m.channel_id = $1 AND m.id = $3 AND NOT m.deleted
+RETURNING m.views_count`, channelID, views, messageID).Scan(&final); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return 0, domain.ErrChannelInvalid
+		}
+		return 0, fmt.Errorf("set channel fake views: %w", err)
+	}
+	return final, nil
 }

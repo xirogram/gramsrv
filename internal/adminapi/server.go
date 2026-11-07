@@ -48,6 +48,7 @@ type Service interface {
 	UpdateDonationChain(ctx context.Context, req admin.UpdateDonationChainRequest) (admin.CommandResult, error)
 	SetVerified(ctx context.Context, req admin.SetVerifiedRequest) (admin.CommandResult, error)
 	SetUserFlags(ctx context.Context, req admin.SetUserFlagsRequest) (admin.CommandResult, error)
+	SetCustomLabel(ctx context.Context, req admin.SetCustomLabelRequest) (admin.CommandResult, error)
 	SetChannelVerified(ctx context.Context, req admin.SetChannelVerifiedRequest) (admin.CommandResult, error)
 	SetChannelFlags(ctx context.Context, req admin.SetChannelFlagsRequest) (admin.CommandResult, error)
 	CreateBot(ctx context.Context, req admin.CreateBotRequest) (admin.CommandResult, error)
@@ -252,6 +253,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/item-prices/set-rate", s.authorized(PermissionPricesManage, s.handleSetStarsRate))
 	mux.HandleFunc("POST /v1/accounts/set-verified", s.authenticated(s.handleSetVerified))
 	mux.HandleFunc("POST /v1/accounts/set-flags", s.authenticated(s.handleSetUserFlags))
+	mux.HandleFunc("POST /v1/accounts/set-label", s.authenticated(s.handleSetCustomLabel))
 	mux.HandleFunc("POST /v1/accounts/set-support", s.authenticated(s.handleSetSupport))
 	mux.HandleFunc("POST /v1/accounts/set-username", s.authenticated(s.handleSetUsername))
 	mux.HandleFunc("GET /v1/accounts/{id}/avatar", s.authenticated(s.handleAccountAvatar))
@@ -556,6 +558,15 @@ func (s *Server) handleSetChannelVerified(w http.ResponseWriter, r *http.Request
 		return
 	}
 	result, err := s.svc.SetChannelVerified(r.Context(), req)
+	writeCommandResult(w, result, err)
+}
+
+func (s *Server) handleSetCustomLabel(w http.ResponseWriter, r *http.Request) {
+	var req admin.SetCustomLabelRequest
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	result, err := s.svc.SetCustomLabel(r.Context(), req)
 	writeCommandResult(w, result, err)
 }
 

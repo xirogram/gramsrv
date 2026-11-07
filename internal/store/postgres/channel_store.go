@@ -162,7 +162,7 @@ c.broadcast, c.megagroup, c.forum, c.forum_tabs, c.autotranslation, c.restricted
 EXISTS (SELECT 1 FROM channel_invites ci WHERE ci.channel_id = c.id AND NOT ci.revoked) AS has_link,
 c.linked_chat_id, c.linked_community_id, c.monoforum, c.linked_monoforum_id, c.slowmode_seconds, c.boosts_unrestrict, c.default_banned_rights::text,
 c.available_reactions::text, c.color_set, c.color, c.color_background_emoji_id, c.profile_color_set, c.profile_color, c.profile_color_background_emoji_id, c.emoji_status_document_id, c.emoji_status_until,
-c.wallpaper::text, c.participants_count, c.admins_count, c.kicked_count, c.banned_count, c.top_message_id, c.pinned_message_id, c.pts,
+c.wallpaper::text, c.participants_count, COALESCE(c.fake_participants, 0), c.admins_count, c.kicked_count, c.banned_count, c.top_message_id, c.pinned_message_id, c.pts,
 c.ttl_period, c.date, c.deleted, c.photo_id, c.photo_dc_id, c.photo_stripped,
 c.active_call_id, c.active_call_access_hash, c.active_call_not_empty`
 

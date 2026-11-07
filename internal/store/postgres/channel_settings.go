@@ -353,6 +353,45 @@ FOR UPDATE`, channelID).Scan(&currentScam, &currentFake); err != nil {
 	return channel, nil
 }
 
+// SetChannelFakeParticipants sets the visually displayed participant count
+// (fake subscribers). count <= 0 clears the override.
+func (s *ChannelStore) SetChannelFakeParticipants(ctx context.Context, channelID int64, count int) (domain.Channel, error) {
+	if channelID == 0 {
+		return domain.Channel{}, domain.ErrChannelInvalid
+	}
+	if count < 0 {
+		count = 0
+	}
+	if _, err := s.db.Exec(ctx, `UPDATE channels SET fake_participants = $2, updated_at = now() WHERE id = $1 AND NOT deleted`, channelID, count); err != nil {
+		return domain.Channel{}, fmt.Errorf("set channel fake participants: %w", err)
+	}
+	if s.rowCache != nil {
+		s.rowCache.delete(channelID)
+	}
+	channel, err := s.channelByID(ctx, s.db, channelID)
+	if err != nil {
+		return domain.Channel{}, err
+	}
+	return channel, nil
+}
+
+// ChannelIDByUsername resolves a not-deleted channel/supergroup ID by username.
+func (s *ChannelStore) ChannelIDByUsername(ctx context.Context, username string) (int64, error) {
+	username = strings.TrimPrefix(strings.TrimSpace(username), "@")
+	if username == "" {
+		return 0, domain.ErrChannelInvalid
+	}
+	var id int64
+	err := s.db.QueryRow(ctx, `SELECT id FROM channels WHERE lower(COALESCE(username, '')) = lower($1) AND NOT deleted ORDER BY id LIMIT 1`, username).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, domain.ErrChannelInvalid
+	}
+	if err != nil {
+		return 0, fmt.Errorf("channel id by username: %w", err)
+	}
+	return id, nil
+}
+
 // SetChannelAdminSettings applies an admin-direct moderation-settings patch
 // (no membership/permission checks). nil fields are left unchanged.
 func (s *ChannelStore) SetChannelAdminSettings(ctx context.Context, channelID int64, patch domain.ChannelAdminSettings) (domain.Channel, error) {

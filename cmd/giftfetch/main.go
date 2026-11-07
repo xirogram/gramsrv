@@ -32,6 +32,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -605,6 +606,7 @@ func fetchCatalog(ctx context.Context, api *tg.Client, outDir string, maxDocByte
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
 	fmt.Printf("[documents discovered] count=%d workers=%d\n", len(ids), workers)
 	documentResults := make([]documentManifest, len(ids))
+	var failedDocuments sync.Map // int64 -> error
 	group, downloadCtx := errgroup.WithContext(ctx)
 	group.SetLimit(workers)
 	var completed atomic.Int64
@@ -624,7 +626,9 @@ func fetchCatalog(ctx context.Context, api *tg.Client, outDir string, maxDocByte
 			})
 			dm, err := fetchDocument(downloadCtx, api, dl, outDir, documents[id], maxDocBytes, skipThumbs, allowedMissingThumbs)
 			if err != nil {
-				return err
+				failedDocuments.Store(id, err)
+				fmt.Printf("[document skipped] document=%d error=%v (dropping from manifest)\n", id, err)
+				return nil
 			}
 			documentResults[index] = dm
 			done := completed.Add(1)
@@ -637,7 +641,12 @@ func fetchCatalog(ctx context.Context, api *tg.Client, outDir string, maxDocByte
 	if err := group.Wait(); err != nil {
 		return err
 	}
-	for _, dm := range documentResults {
+	for index, id := range ids {
+		if _, failed := failedDocuments.Load(id); failed {
+			delete(documents, id)
+			continue
+		}
+		dm := documentResults[index]
 		manifest.TotalBytes += dm.File.Size
 		for _, thumb := range dm.Thumbs {
 			manifest.TotalBytes += thumb.Size
@@ -645,6 +654,7 @@ func fetchCatalog(ctx context.Context, api *tg.Client, outDir string, maxDocByte
 		manifest.MissingThumbCount += len(dm.MissingThumbs)
 		manifest.Documents = append(manifest.Documents, dm)
 	}
+	pruneFailedDocuments(&manifest, documents)
 
 	encoded, err := json.MarshalIndent(manifest, "", "  ")
 	if err != nil {
@@ -655,6 +665,57 @@ func fetchCatalog(ctx context.Context, api *tg.Client, outDir string, maxDocByte
 	}
 	fmt.Printf("[complete] gifts=%d attribute_sets=%d attributes=%d documents=%d missing_thumbs=%d bytes=%d manifest=%s\n", len(manifest.Gifts), len(manifest.UpgradeAttributeSets), manifest.UpgradeAttributeCount, len(manifest.Documents), manifest.MissingThumbCount, manifest.TotalBytes, filepath.Join(outDir, "manifest.json"))
 	return nil
+}
+
+// pruneFailedDocuments removes gifts and upgrade-attribute sets that reference
+// documents whose download failed, so one dead Telegram file cannot block the
+// whole snapshot.
+func pruneFailedDocuments(manifest *catalogManifest, documents map[int64]*documentSource) {
+	kept := manifest.Gifts[:0]
+	for _, gift := range manifest.Gifts {
+		if len(gift.DocumentIDs) != 1 {
+			kept = append(kept, gift)
+			continue
+		}
+		if _, ok := documents[gift.DocumentIDs[0]]; !ok {
+			fmt.Printf("[gift dropped] gift_id=%d title=%q: base document download failed\n", gift.ID, gift.Title)
+			continue
+		}
+		kept = append(kept, gift)
+	}
+	manifest.Gifts = kept
+	manifest.GiftCount = len(kept)
+
+	sets := manifest.UpgradeAttributeSets[:0]
+	manifest.UpgradeAttributeCount = 0
+	manifest.UpgradeModelCount = 0
+	manifest.UpgradePatternCount = 0
+	manifest.UpgradeBackdropCount = 0
+	for _, set := range manifest.UpgradeAttributeSets {
+		complete := true
+		for _, model := range set.Models {
+			if _, ok := documents[model.DocumentID]; !ok {
+				complete = false
+			}
+		}
+		for _, pattern := range set.Patterns {
+			if _, ok := documents[pattern.DocumentID]; !ok {
+				complete = false
+			}
+		}
+		if !complete {
+			fmt.Printf("[attribute set dropped] gift_id=%d: model/pattern document download failed\n", set.GiftID)
+			continue
+		}
+		sets = append(sets, set)
+		manifest.UpgradeAttributeCount += set.AttributeCount
+		manifest.UpgradeModelCount += len(set.Models)
+		manifest.UpgradePatternCount += len(set.Patterns)
+		manifest.UpgradeBackdropCount += len(set.Backdrops)
+	}
+	manifest.UpgradeAttributeSets = sets
+	manifest.UpgradeAttributeSetCount = len(sets)
+	manifest.UpgradeableGiftCount = len(sets)
 }
 
 func collectUpgradeableGiftIDs(classes []tg.StarGiftClass) []int64 {

@@ -122,6 +122,10 @@ func (p *Projector) ForViewerUserIDs(ctx context.Context, userIDsByViewer map[in
 	if err := g.Wait(); err != nil {
 		return nil, err
 	}
+	labelsByID := map[int64]string{}
+	if p.labels != nil {
+		labelsByID, _ = p.labels.CustomLabels(ctx, unionIDs)
+	}
 	if p.privacy != nil && len(privacyPairs) > 0 {
 		evaluator, ok := p.privacy.(SparsePrivacyEvaluator)
 		if !ok {
@@ -162,6 +166,7 @@ func (p *Projector) ForViewerUserIDs(ctx context.Context, userIDsByViewer map[in
 				user = applyCollectiblePhone(user, collectiblePhones[user.ID])
 			}
 			user = reapplyExclusiveCollectiblePhone(user, collectiblePhones[user.ID])
+			user = applyCustomLabel(user, labelsByID[user.ID])
 			user = applyAccountFreezeProjection(user, viewerID, freezes[user.ID])
 			projected[i] = user
 		}

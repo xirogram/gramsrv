@@ -1584,7 +1584,7 @@ func (s *MediaStore) WithTx(ctx context.Context, fn func(ctx context.Context, tx
 const botAvatarsLockKey = int64(0x626f746176617461) // "botavata"
 
 func normalizeProfilePhotoKind(kind domain.ProfilePhotoKind) domain.ProfilePhotoKind {
-	if kind == domain.ProfilePhotoKindFallback {
+	if kind == domain.ProfilePhotoKindFallback || kind == domain.ProfilePhotoKindBanner {
 		return kind
 	}
 	return domain.ProfilePhotoKindProfile

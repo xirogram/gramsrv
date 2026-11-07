@@ -829,7 +829,14 @@ func (s *StarGiftStore) ReorderCollections(ctx context.Context, owner domain.Pee
 }
 
 func (s *StarGiftStore) SetPinned(ctx context.Context, owner domain.Peer, savedGiftIDs []int64) error {
-	if len(savedGiftIDs) > domain.MaxPinnedStarGifts {
+	limit := int64(domain.MaxPinnedStarGifts)
+	if owner.Type == domain.PeerTypeUser {
+		var verified bool
+		if err := s.db.QueryRow(ctx, `SELECT verified FROM users WHERE id=$1`, owner.ID).Scan(&verified); err == nil && verified {
+			limit = int64(domain.MaxPinnedStarGiftsVerified)
+		}
+	}
+	if int64(len(savedGiftIDs)) > limit {
 		return domain.ErrStarGiftCollectibleInvalid
 	}
 	return withTx(ctx, s.db, "set pinned star gifts", func(tx pgx.Tx) error {

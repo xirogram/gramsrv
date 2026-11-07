@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // Collectible (Fragment-style) usernames.
@@ -20,7 +21,7 @@ import (
 // a collectible market distributes. They still have to be syntactically
 // resolvable by clients, so the character rules are identical.
 const (
-	MinCollectibleUsernameLength = 4
+	MinCollectibleUsernameLength = 3
 	MaxCollectibleUsernameLength = 32
 	// MaxPeerCollectibleUsernames bounds the collectible rows a single peer can
 	// hold. The TL usernames vector is rendered in full by clients, so the bound
@@ -307,19 +308,20 @@ func ValidCollectibleUsername(username string) bool {
 }
 
 func validUsernameChars(username string, minLen, maxLen int) bool {
-	if len(username) < minLen || len(username) > maxLen {
+	count := utf8.RuneCountInString(username)
+	if count < minLen || count > maxLen {
 		return false
 	}
-	for i := 0; i < len(username); i++ {
-		c := username[i]
+	for i, r := range username {
 		switch {
-		case c >= 'a' && c <= 'z':
-		case c >= 'A' && c <= 'Z':
-		case c >= '0' && c <= '9':
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case (r >= 'а' && r <= 'я') || (r >= 'А' && r <= 'Я') || r == 'ё' || r == 'Ё':
+		case r >= '0' && r <= '9':
 			if i == 0 {
 				return false
 			}
-		case c == '_':
+		case r == '_':
 			if i == 0 {
 				return false
 			}

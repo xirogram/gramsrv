@@ -37,6 +37,12 @@ type CollectiblePhoneProvider interface {
 	OwnedCollectiblePhones(ctx context.Context, userIDs []int64) (map[int64]domain.CollectiblePhone, error)
 }
 
+// CustomLabelProvider batches operator-set custom labels ("scam"-like chip
+// text). Empty labels are omitted by the provider.
+type CustomLabelProvider interface {
+	CustomLabels(ctx context.Context, userIDs []int64) (map[int64]string, error)
+}
+
 // BatchPrivacyEvaluator evaluates visibility of multiple owners to a single viewer in a
 // batch, eliminating the per-user 3×CanSee N+1 in projectBatch / fan-out projection.
 // Optional: an evaluator that implements it (privacy.Service) makes projectBatch prefer
@@ -65,6 +71,7 @@ var privacyProjectionKeys = []domain.PrivacyKey{
 // Projector builds the current viewer's user view for RPC response payloads.
 // It intentionally stays in app/domain types; tg.* conversion remains in rpc.
 type Projector struct {
+	labels    CustomLabelProvider
 	contacts store.ContactStore
 	photos   ProfilePhotoProvider
 	privacy  PrivacyEvaluator
@@ -99,6 +106,11 @@ func WithCollectiblePhoneProvider(provider CollectiblePhoneProvider) Option {
 	return func(p *Projector) { p.phones = provider }
 }
 
+// WithCustomLabelProvider enables operator custom-label restriction chip.
+func WithCustomLabelProvider(provider CustomLabelProvider) Option {
+	return func(p *Projector) { p.labels = provider }
+}
+
 // New creates a user projector.
 func New(opts ...Option) *Projector {
 	p := &Projector{}
@@ -114,7 +126,7 @@ func (p *Projector) ForViewer(ctx context.Context, viewerUserID int64, users []d
 	if p == nil {
 		return users, nil
 	}
-	return projectBatch(ctx, p.contacts, p.photos, p.privacy, p.freezes, p.phones, viewerUserID, users)
+	return projectBatch(ctx, p.contacts, p.photos, p.privacy, p.freezes, p.phones, p.labels, viewerUserID, users)
 }
 
 // One applies ForViewer to a single user.
@@ -165,6 +177,7 @@ func (p *Projector) ForViewers(ctx context.Context, viewerUserIDs []int64, users
 		matrix               map[int64]map[int64]map[domain.PrivacyKey]bool
 		freezes              map[int64]domain.AccountFreeze
 		collectiblePhones    map[int64]domain.CollectiblePhone
+		labelsByID           map[int64]string
 	)
 	g, gctx := errgroup.WithContext(ctx)
 	// 1) Shared photos: one profile/fallback batch, reused across all viewers.
@@ -209,6 +222,13 @@ func (p *Projector) ForViewers(ctx context.Context, viewerUserIDs []int64, users
 			return err
 		})
 	}
+	if p.labels != nil && len(ids) > 0 {
+		g.Go(func() error {
+			var err error
+			labelsByID, err = p.labels.CustomLabels(gctx, ids)
+			return err
+		})
+	}
 	if err := g.Wait(); err != nil {
 		return nil, err
 	}
@@ -250,7 +270,7 @@ func (p *Projector) ForViewers(ctx context.Context, viewerUserIDs []int64, users
 				pj = applyCollectiblePhone(pj, collectiblePhones[u.ID])
 			}
 			pj = reapplyExclusiveCollectiblePhone(pj, collectiblePhones[u.ID])
-			pj = applyAccountFreezeProjection(pj, viewer, freezes[u.ID])
+			pj = applyCustomLabel(applyAccountFreezeProjection(pj, viewer, freezes[u.ID]), labelsByID[u.ID])
 			cache[u.ID] = pj
 			projected[i] = pj
 		}
@@ -286,6 +306,20 @@ func (p *Projector) batchProfileFallbackPhotos(ctx context.Context, ids []int64)
 		return nil, nil, err
 	}
 	return refs, fallbackRefs, nil
+}
+
+// batchCustomLabels fetches operator labels for deduped non-zero ids when
+// the provider is configured; otherwise returns an empty map.
+func batchCustomLabels(ctx context.Context, p CustomLabelProvider, ids []int64) map[int64]string {
+	out := map[int64]string{}
+	if p == nil || len(ids) == 0 {
+		return out
+	}
+	found, err := p.CustomLabels(ctx, ids)
+	if err != nil {
+		return out
+	}
+	return found
 }
 
 func cloneUsers(users []domain.User) []domain.User {
@@ -392,7 +426,7 @@ func One(ctx context.Context, contacts store.ContactStore, viewerUserID int64, u
 	return projected[0], nil
 }
 
-func projectBatch(ctx context.Context, contacts store.ContactStore, photos ProfilePhotoProvider, privacy PrivacyEvaluator, freezesProvider AccountFreezeProvider, phoneProvider CollectiblePhoneProvider, viewerUserID int64, users []domain.User) ([]domain.User, error) {
+func projectBatch(ctx context.Context, contacts store.ContactStore, photos ProfilePhotoProvider, privacy PrivacyEvaluator, freezesProvider AccountFreezeProvider, phoneProvider CollectiblePhoneProvider, labelsProvider CustomLabelProvider, viewerUserID int64, users []domain.User) ([]domain.User, error) {
 	if len(users) == 0 {
 		return users, nil
 	}
@@ -488,6 +522,14 @@ func projectBatch(ctx context.Context, contacts store.ContactStore, photos Profi
 			return err
 		})
 	}
+	labelsByID := map[int64]string{}
+	if labelsProvider != nil && len(ids) > 0 {
+		g.Go(func() error {
+			var err error
+			labelsByID, err = labelsProvider.CustomLabels(gctx, ids)
+			return err
+		})
+	}
 	if err := g.Wait(); err != nil {
 		return nil, err
 	}
@@ -523,7 +565,9 @@ func projectBatch(ctx context.Context, contacts store.ContactStore, photos Profi
 			projected = applyCollectiblePhone(projected, collectiblePhones[u.ID])
 		}
 		projected = reapplyExclusiveCollectiblePhone(projected, collectiblePhones[u.ID])
-		projected = applyAccountFreezeProjection(projected, viewerUserID, freezes[u.ID])
+		projected = applyCustomLabel(
+			applyAccountFreezeProjection(projected, viewerUserID, freezes[u.ID]),
+			labelsByID[u.ID])
 		cache[u.ID] = projected
 		out[i] = projected
 	}
@@ -534,6 +578,16 @@ func applyCollectiblePhone(user domain.User, phone domain.CollectiblePhone) doma
 	if !user.Deleted && !user.Bot && phone.Owned() && phone.OwnerUserID == user.ID {
 		user.Phone = phone.Phone
 	}
+	return user
+}
+
+// applyCustomLabel attaches the operator-set custom label as a visible
+// restriction reason ("scam"-style chip with free-form text).
+func applyCustomLabel(user domain.User, label string) domain.User {
+	if label == "" || user.Deleted {
+		return user
+	}
+	user.RestrictionReasons = append(user.RestrictionReasons, domain.UserRestrictionReason{Platform: "all", Reason: "custom", Text: label})
 	return user
 }
 

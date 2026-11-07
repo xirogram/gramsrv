@@ -946,7 +946,11 @@ func (s *StarGiftStore) SetUnsaved(ctx context.Context, ref domain.SavedStarGift
 			// The positive-order unique index is immediate. Move the bounded
 			// vector one vacant slot at a time so no transient duplicate order
 			// can be observed by PostgreSQL.
-			for order := pinnedOrder + 1; order <= domain.MaxPinnedStarGifts; order++ {
+			var maxOrder int64
+			if err := tx.QueryRow(ctx, `SELECT coalesce(max(pinned_order),0) FROM peer_star_gifts WHERE owner_peer_type=$1 AND owner_peer_id=$2 AND pinned_order<>0`, string(ref.Owner.Type), ref.Owner.ID).Scan(&maxOrder); err != nil {
+				return err
+			}
+			for order := int64(pinnedOrder) + 1; order <= maxOrder; order++ {
 				if _, err := tx.Exec(ctx, `UPDATE peer_star_gifts SET pinned_order=$4
 WHERE owner_peer_type=$1 AND owner_peer_id=$2 AND pinned_order=$3`, string(ref.Owner.Type), ref.Owner.ID, order, order-1); err != nil {
 					return err

@@ -319,3 +319,34 @@ func cloneChannel(in domain.Channel) domain.Channel {
 	in.Wallpaper = domain.CloneWallpaperPtr(in.Wallpaper)
 	return in
 }
+
+// SetChannelFakeParticipants stub for admin flows in tests.
+func (s *ChannelStore) SetChannelFakeParticipants(ctx context.Context, channelID int64, count int) (domain.Channel, error) {
+	ch, err := s.GetChannelByID(ctx, channelID)
+	if err != nil {
+		return domain.Channel{}, err
+	}
+	ch.FakeParticipants = count
+	return ch, nil
+}
+
+// ChannelIDByUsername stub for admin flows in tests.
+func (s *ChannelStore) ChannelIDByUsername(ctx context.Context, username string) (int64, error) {
+	username = strings.TrimPrefix(strings.TrimSpace(username), "@")
+	for _, ch := range s.channels {
+		if ch.Username == username && !ch.Deleted {
+			return ch.ID, nil
+		}
+	}
+	return 0, domain.ErrChannelInvalid
+}
+
+// SetChannelFakeMessageViews stub for admin flows in tests.
+func (s *ChannelStore) SetChannelFakeMessageViews(ctx context.Context, channelID int64, messageID int, views int) (int, error) {
+	return 0, domain.ErrChannelInvalid
+}
+
+// SetChannelFakeMessageReactions stub for admin flows in tests.
+func (s *ChannelStore) SetChannelFakeMessageReactions(ctx context.Context, channelID int64, messageID int, counts map[string]int) (map[string]int, error) {
+	return nil, domain.ErrChannelInvalid
+}
