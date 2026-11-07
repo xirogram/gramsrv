@@ -25,6 +25,15 @@ func (s *collectibleEmojiGiftService) UniqueByID(_ context.Context, id int64) (d
 	return gift, ok, nil
 }
 
+func (s *collectibleEmojiGiftService) UniqueBySlug(_ context.Context, slug string) (domain.UniqueStarGift, bool, error) {
+	for _, gift := range s.gifts {
+		if gift.Slug == slug {
+			return gift, true, nil
+		}
+	}
+	return domain.UniqueStarGift{}, false, nil
+}
+
 func (s *collectibleEmojiGiftService) ListUniqueByOwner(_ context.Context, owner domain.Peer, limit int) ([]domain.UniqueStarGift, error) {
 	out := make([]domain.UniqueStarGift, 0, len(s.gifts))
 	for _, gift := range s.gifts {

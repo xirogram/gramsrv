@@ -246,6 +246,9 @@ func (r *Router) registerAccount(d *tlprofile.Dispatcher) {
 	registerRPC[*tg.AccountGetThemeRequest](d, tlprofile.SemanticMethodAccountGetTheme, func(ctx context.Context, layerRequest *tg.AccountGetThemeRequest) (any, error) {
 		return r.onAccountGetTheme(ctx, layerRequest)
 	})
+	registerRPC[*tg.AccountUploadWallPaperRequest](d, tlprofile.SemanticMethodAccountUploadWallPaper, func(ctx context.Context, layerRequest *tg.AccountUploadWallPaperRequest) (any, error) {
+		return r.onAccountUploadWallPaper(ctx, layerRequest)
+	})
 	registerRPC[*tg.AccountGetWallPapersRequest](d, tlprofile.SemanticMethodAccountGetWallPapers, func(ctx context.Context, layerRequest *tg.AccountGetWallPapersRequest) (any, error) {
 		hash := layerRequest.
 			Hash
@@ -264,7 +267,7 @@ func (r *Router) registerAccount(d *tlprofile.Dispatcher) {
 		if _, _, err := r.currentUserID(ctx); err != nil {
 			return nil, internalErr()
 		}
-		found, ok := tdesktop.LookupWallPaper(wallpaper)
+		found, ok := r.lookupWallPaper(ctx, wallpaper)
 		if !ok {
 			return nil, tgerr400("WALLPAPER_INVALID")
 		}
@@ -287,7 +290,7 @@ func (r *Router) registerAccount(d *tlprofile.Dispatcher) {
 		// so none of the patterns loaded.
 		found := make([]tg.WallPaperClass, 0, len(wallpapers))
 		for _, input := range wallpapers {
-			wallpaper, ok := tdesktop.LookupWallPaper(input)
+			wallpaper, ok := r.lookupWallPaper(ctx, input)
 			if !ok {
 				r.log.Debug("wallpaper reference skipped", wallpaperReferenceLogFields("account.getMultiWallPapers", input)...)
 				continue
@@ -303,7 +306,7 @@ func (r *Router) registerAccount(d *tlprofile.Dispatcher) {
 		if req == nil {
 			return false, tgerr400("WALLPAPER_INVALID")
 		}
-		if _, ok := tdesktop.LookupWallPaper(req.Wallpaper); !ok {
+		if _, ok := r.lookupWallPaper(ctx, req.Wallpaper); !ok {
 			r.log.Info("wallpaper reference rejected", wallpaperReferenceLogFields("account.installWallPaper", req.Wallpaper)...)
 			return false, tgerr400("WALLPAPER_INVALID")
 		}
@@ -316,7 +319,7 @@ func (r *Router) registerAccount(d *tlprofile.Dispatcher) {
 		if req == nil {
 			return false, tgerr400("WALLPAPER_INVALID")
 		}
-		if _, ok := tdesktop.LookupWallPaper(req.Wallpaper); !ok {
+		if _, ok := r.lookupWallPaper(ctx, req.Wallpaper); !ok {
 			return false, tgerr400("WALLPAPER_INVALID")
 		}
 		return true, nil
@@ -328,13 +331,7 @@ func (r *Router) registerAccount(d *tlprofile.Dispatcher) {
 		return true, nil
 	})
 	registerRPC[*tg.AccountGetUniqueGiftChatThemesRequest](d, tlprofile.SemanticMethodAccountGetUniqueGiftChatThemes, func(ctx context.Context, req *tg.AccountGetUniqueGiftChatThemesRequest) (any, error) {
-		if _, _, err := r.currentUserID(ctx); err != nil {
-			return nil, internalErr()
-		}
-		if req == nil {
-			req = &tg.AccountGetUniqueGiftChatThemesRequest{}
-		}
-		return tdesktop.UniqueGiftChatThemes(req.Hash), nil
+		return r.onAccountGetUniqueGiftChatThemes(ctx, req)
 	})
 	registerRPC[*tg.AccountGetRecentEmojiStatusesRequest](d, tlprofile.SemanticMethodAccountGetRecentEmojiStatuses, func(ctx context.Context, layerRequest *tg.AccountGetRecentEmojiStatusesRequest) (any, error) {
 		hash := layerRequest.
@@ -2329,3 +2326,90 @@ func profileErr(err error) error {
 		return internalErr()
 	}
 }
+
+func (r *Router) onAccountUploadWallPaper(ctx context.Context, req *tg.AccountUploadWallPaperRequest) (tg.WallPaperClass, error) {
+	if req == nil {
+		return nil, tgerr400("WALLPAPER_FILE_INVALID")
+	}
+	userID, _, err := r.currentUserID(ctx)
+	if err != nil {
+		return nil, internalErr()
+	}
+	if userID == 0 {
+		return nil, authKeyUnregisteredErr()
+	}
+	if r.deps.Files == nil {
+		return nil, notImplementedErr()
+	}
+	if req.File == nil {
+		return nil, tgerr400("WALLPAPER_FILE_INVALID")
+	}
+	ref, ok := uploadedFileRef(userID, req.File)
+	if !ok {
+		return nil, tgerr400("WALLPAPER_FILE_INVALID")
+	}
+	mimeType := req.MimeType
+	if mimeType == "" {
+		mimeType = "image/jpeg"
+	}
+	spec := domain.DocumentSpec{
+		MimeType: mimeType,
+		Attributes: []domain.DocumentAttribute{
+			{Kind: domain.DocAttrFilename, FileName: "wallpaper.jpg"},
+			{Kind: domain.DocAttrImageSize, W: 1920, H: 1080},
+		},
+	}
+	doc, err := r.deps.Files.CreateDocumentFromUpload(ctx, ref, spec)
+	if err != nil {
+		return nil, mediaUploadErr(err)
+	}
+	wp := &tg.WallPaper{
+		ID:         doc.ID,
+		AccessHash: doc.AccessHash,
+		Creator:    true,
+		Document:   tgDocument(doc),
+		Settings:   req.Settings,
+	}
+	wp.SetFlags()
+	return wp, nil
+}
+
+func (r *Router) onAccountGetUniqueGiftChatThemes(ctx context.Context, req *tg.AccountGetUniqueGiftChatThemesRequest) (tg.AccountChatThemesClass, error) {
+	userID, _, err := r.currentUserID(ctx)
+	if err != nil {
+		return nil, internalErr()
+	}
+	if req == nil {
+		req = &tg.AccountGetUniqueGiftChatThemesRequest{}
+	}
+	if r.deps.Gifts == nil || userID == 0 {
+		return tdesktop.UniqueGiftChatThemes(req.Hash), nil
+	}
+	gifts, err := r.deps.Gifts.ListUniqueByOwner(ctx, domain.Peer{Type: domain.PeerTypeUser, ID: userID}, 100)
+	if err != nil {
+		return nil, internalErr()
+	}
+	var themes []tg.ChatThemeClass
+	var hash int64
+	for _, g := range gifts {
+		if g.Burned || g.OwnerAddress != "" || g.Pattern.Document == nil {
+			continue
+		}
+		theme := tgChatThemeUniqueGift(g)
+		themes = append(themes, theme)
+		hash ^= g.ID
+	}
+	if len(themes) == 0 {
+		return tdesktop.UniqueGiftChatThemes(req.Hash), nil
+	}
+	if req.Hash != 0 && req.Hash == hash {
+		return &tg.AccountChatThemesNotModified{}, nil
+	}
+	return &tg.AccountChatThemes{
+		Hash:   hash,
+		Themes: themes,
+		Chats:  []tg.ChatClass{},
+		Users:  []tg.UserClass{},
+	}, nil
+}
+

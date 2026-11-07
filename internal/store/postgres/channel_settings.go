@@ -529,8 +529,17 @@ func (s *ChannelStore) SetChannelEmojiStatusAdmin(ctx context.Context, channelID
 	if err != nil {
 		return domain.Channel{}, err
 	}
-	if _, err := s.db.Exec(ctx, `UPDATE channels SET emoji_status_document_id = $2, emoji_status_until = $3, updated_at = now() WHERE id = $1`,
-		channelID, status.DocumentID, status.Until); err != nil {
+	var collectibleID *int64
+	collectibleJSON := []byte(`{}`)
+	if !status.Collectible.Empty() {
+		id := status.Collectible.CollectibleID
+		collectibleID = &id
+		if raw, err := json.Marshal(status.Collectible); err == nil {
+			collectibleJSON = raw
+		}
+	}
+	if _, err := s.db.Exec(ctx, `UPDATE channels SET emoji_status_document_id = $2, emoji_status_until = $3, emoji_status_collectible_id = $4, emoji_status_collectible = $5::jsonb, updated_at = now() WHERE id = $1`,
+		channelID, status.DocumentID, status.Until, collectibleID, string(collectibleJSON)); err != nil {
 		return domain.Channel{}, fmt.Errorf("set channel emoji status: %w", err)
 	}
 	if s.rowCache != nil {
@@ -1065,8 +1074,17 @@ func (s *ChannelStore) SetEmojiStatus(ctx context.Context, userID, channelID int
 	if !canChangeChannelInfo(member) {
 		return domain.Channel{}, domain.ErrChannelAdminRequired
 	}
-	if _, err := tx.Exec(ctx, `UPDATE channels SET emoji_status_document_id = $2, emoji_status_until = $3, updated_at = now() WHERE id = $1`,
-		channelID, status.DocumentID, status.Until); err != nil {
+	var collectibleID *int64
+	collectibleJSON := []byte(`{}`)
+	if !status.Collectible.Empty() {
+		id := status.Collectible.CollectibleID
+		collectibleID = &id
+		if raw, err := json.Marshal(status.Collectible); err == nil {
+			collectibleJSON = raw
+		}
+	}
+	if _, err := tx.Exec(ctx, `UPDATE channels SET emoji_status_document_id = $2, emoji_status_until = $3, emoji_status_collectible_id = $4, emoji_status_collectible = $5::jsonb, updated_at = now() WHERE id = $1`,
+		channelID, status.DocumentID, status.Until, collectibleID, string(collectibleJSON)); err != nil {
 		return domain.Channel{}, fmt.Errorf("update channel emoji status: %w", err)
 	}
 	channel.EmojiStatus = status

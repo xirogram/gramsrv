@@ -258,6 +258,21 @@ type Document struct {
 	Thumbs        []PhotoSize         `json:"thumbs,omitempty"`
 }
 
+// Clone returns a deep copy of the document and its slices.
+func (d Document) Clone() Document {
+	out := d
+	if len(d.FileReference) > 0 {
+		out.FileReference = append([]byte(nil), d.FileReference...)
+	}
+	if len(d.Attributes) > 0 {
+		out.Attributes = append([]DocumentAttribute(nil), d.Attributes...)
+	}
+	if len(d.Thumbs) > 0 {
+		out.Thumbs = append([]PhotoSize(nil), d.Thumbs...)
+	}
+	return out
+}
+
 // StickerSetRef returns the sticker set reference this document belongs to (if it has a sticker/custom_emoji attribute).
 func (d Document) StickerSetRef() (id, accessHash int64, ok bool) {
 	for _, attr := range d.Attributes {

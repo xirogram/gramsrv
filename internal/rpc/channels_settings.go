@@ -182,7 +182,7 @@ func (r *Router) onChannelsUpdateEmojiStatus(ctx context.Context, req *tg.Channe
 	if err != nil {
 		return nil, err
 	}
-	status, err := domainChannelEmojiStatus(req.EmojiStatus)
+	status, err := r.domainChannelEmojiStatus(ctx, viewerUserID, view.Channel.ID, req.EmojiStatus)
 	if err != nil {
 		return nil, err
 	}
@@ -437,13 +437,23 @@ func (r *Router) onChannelsEditPhoto(ctx context.Context, req *tg.ChannelsEditPh
 	if err != nil {
 		return nil, internalErr()
 	}
-	photo, err := r.resolveInputChatPhoto(ctx, userID, req.Photo)
+	photo, existing, err := r.resolveInputChatPhoto(ctx, userID, req.Photo)
 	if err != nil {
 		return nil, err
 	}
+	// The store checks the change-info right again in its transaction; checking it here first
+	// keeps a rejected call from deriving an avatar for an existing photo.
 	if community, ok, err := r.maybeCommunityFromInput(ctx, userID, req.Channel); ok {
 		if err != nil {
 			return nil, err
+		}
+		if existing {
+			if !community.Self.CanChangeInfo() {
+				return nil, communityErr(domain.ErrCommunityAdminRequired)
+			}
+			if photo, err = r.chatAvatarPhoto(ctx, photo); err != nil {
+				return nil, err
+			}
 		}
 		view, changed, err := r.deps.Communities.SetPhoto(ctx, userID, community.Community.ID, photo, int(r.clock.Now().Unix()))
 		if err != nil {
@@ -457,6 +467,14 @@ func (r *Router) onChannelsEditPhoto(ctx context.Context, req *tg.ChannelsEditPh
 	channelID, err := r.channelIDFromInput(ctx, userID, req.Channel)
 	if err != nil {
 		return nil, err
+	}
+	if existing {
+		if _, err := r.deps.Channels.GetChannelForChangeInfo(ctx, userID, channelID); err != nil {
+			return nil, channelAdminErr(err)
+		}
+		if photo, err = r.chatAvatarPhoto(ctx, photo); err != nil {
+			return nil, err
+		}
 	}
 	res, err := r.deps.Channels.SetPhoto(ctx, userID, channelID, photo, int(r.clock.Now().Unix()))
 	if err != nil {
@@ -545,7 +563,7 @@ func domainPeerColorFromChannelUpdate(req *tg.ChannelsUpdateColorRequest) domain
 	return out
 }
 
-func domainChannelEmojiStatus(status tg.EmojiStatusClass) (domain.ChannelEmojiStatus, error) {
+func (r *Router) domainChannelEmojiStatus(ctx context.Context, viewerUserID, channelID int64, status tg.EmojiStatusClass) (domain.ChannelEmojiStatus, error) {
 	switch s := status.(type) {
 	case *tg.EmojiStatusEmpty:
 		return domain.ChannelEmojiStatus{}, nil
@@ -558,17 +576,83 @@ func domainChannelEmojiStatus(status tg.EmojiStatusClass) (domain.ChannelEmojiSt
 			return domain.ChannelEmojiStatus{}, tgerr400("EMOJI_STATUS_INVALID")
 		}
 		return domain.ChannelEmojiStatus{DocumentID: s.DocumentID, Until: until}, nil
-	case *tg.EmojiStatusCollectible:
-		if s.DocumentID <= 0 {
-			return domain.ChannelEmojiStatus{}, tgerr400("EMOJI_STATUS_INVALID")
+	case *tg.InputEmojiStatusCollectible:
+		if r.deps.Gifts == nil || s.CollectibleID <= 0 {
+			return domain.ChannelEmojiStatus{}, tgerr400("COLLECTIBLE_INVALID")
+		}
+		gift, found, err := r.deps.Gifts.UniqueByID(ctx, s.CollectibleID)
+		if err != nil {
+			return domain.ChannelEmojiStatus{}, internalErr()
+		}
+		userOwner := domain.Peer{Type: domain.PeerTypeUser, ID: viewerUserID}
+		channelOwner := domain.Peer{Type: domain.PeerTypeChannel, ID: channelID}
+		if !found || (gift.Owner != userOwner && gift.Owner != channelOwner) || gift.Burned || gift.OwnerAddress != "" {
+			return domain.ChannelEmojiStatus{}, tgerr400("COLLECTIBLE_INVALID")
+		}
+		collectible, valid := domain.CollectibleEmojiStatus(gift)
+		if !valid {
+			return domain.ChannelEmojiStatus{}, tgerr400("COLLECTIBLE_INVALID")
 		}
 		until, _ := s.GetUntil()
 		if until < 0 {
 			return domain.ChannelEmojiStatus{}, tgerr400("EMOJI_STATUS_INVALID")
 		}
-		return domain.ChannelEmojiStatus{DocumentID: s.DocumentID, Until: until}, nil
-	case *tg.InputEmojiStatusCollectible:
-		return domain.ChannelEmojiStatus{}, tgerr400("EMOJI_STATUS_INVALID")
+		return domain.ChannelEmojiStatus{
+			DocumentID:  collectible.DocumentID,
+			Until:       until,
+			Collectible: collectible,
+		}, nil
+	case *tg.EmojiStatusCollectible:
+		if s.CollectibleID <= 0 {
+			if s.DocumentID <= 0 {
+				return domain.ChannelEmojiStatus{}, tgerr400("EMOJI_STATUS_INVALID")
+			}
+			until, _ := s.GetUntil()
+			if until < 0 {
+				return domain.ChannelEmojiStatus{}, tgerr400("EMOJI_STATUS_INVALID")
+			}
+			return domain.ChannelEmojiStatus{DocumentID: s.DocumentID, Until: until}, nil
+		}
+		if r.deps.Gifts != nil {
+			gift, found, err := r.deps.Gifts.UniqueByID(ctx, s.CollectibleID)
+			if err == nil && found {
+				userOwner := domain.Peer{Type: domain.PeerTypeUser, ID: viewerUserID}
+				channelOwner := domain.Peer{Type: domain.PeerTypeChannel, ID: channelID}
+				if (gift.Owner == userOwner || gift.Owner == channelOwner) && !gift.Burned && gift.OwnerAddress == "" {
+					if collectible, valid := domain.CollectibleEmojiStatus(gift); valid {
+						until, _ := s.GetUntil()
+						return domain.ChannelEmojiStatus{
+							DocumentID:  collectible.DocumentID,
+							Until:       until,
+							Collectible: collectible,
+						}, nil
+					}
+				}
+			}
+		}
+		collectible := domain.EmojiStatusCollectible{
+			CollectibleID:     s.CollectibleID,
+			Title:             s.Title,
+			Slug:              s.Slug,
+			DocumentID:        s.DocumentID,
+			PatternDocumentID: s.PatternDocumentID,
+			CenterColor:       s.CenterColor,
+			EdgeColor:         s.EdgeColor,
+			PatternColor:      s.PatternColor,
+			TextColor:         s.TextColor,
+		}
+		if !collectible.Valid() {
+			return domain.ChannelEmojiStatus{}, tgerr400("COLLECTIBLE_INVALID")
+		}
+		until, _ := s.GetUntil()
+		if until < 0 {
+			return domain.ChannelEmojiStatus{}, tgerr400("EMOJI_STATUS_INVALID")
+		}
+		return domain.ChannelEmojiStatus{
+			DocumentID:  s.DocumentID,
+			Until:       until,
+			Collectible: collectible,
+		}, nil
 	default:
 		return domain.ChannelEmojiStatus{}, tgerr400("EMOJI_STATUS_INVALID")
 	}

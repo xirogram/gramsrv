@@ -1929,12 +1929,14 @@ func scanChannelDialogRow(row rowScanner, userID int64) (domain.Channel, domain.
 	var ch domain.Channel
 	var rights, reactionPolicy string
 	var wallpaper *string
+	var collectibleID *int64
+	var collectibleJSON *string
 	var topID, topDate, folderID, readInbox, readOutbox, unreadCount, pinnedOrder, unreadMentions, unreadReactions int
 	var historyClearAnchorID, historyClearAnchorDate int
 	var pinned, unreadMark, viewForumAsMessages, hasScheduled bool
 	var defaultSendAsType sql.NullString
 	var defaultSendAsID sql.NullInt64
-	dest := append(channelScanDest(&ch, &rights, &reactionPolicy, &wallpaper),
+	dest := append(channelScanDest(&ch, &rights, &reactionPolicy, &wallpaper, &collectibleID, &collectibleJSON),
 		&topID, &topDate,
 		&folderID, &readInbox, &readOutbox, &unreadCount, &pinned, &pinnedOrder, &unreadMark, &unreadMentions, &unreadReactions, &viewForumAsMessages, &hasScheduled,
 		&defaultSendAsType, &defaultSendAsID,
@@ -1943,7 +1945,7 @@ func scanChannelDialogRow(row rowScanner, userID int64) (domain.Channel, domain.
 	if err := row.Scan(dest...); err != nil {
 		return domain.Channel{}, domain.Dialog{}, nil, err
 	}
-	finishChannelScan(&ch, rights, reactionPolicy, wallpaper)
+	finishChannelScan(&ch, rights, reactionPolicy, wallpaper, collectibleID, collectibleJSON)
 	dialog := domain.Dialog{
 		Peer:                   domain.Peer{Type: domain.PeerTypeChannel, ID: ch.ID},
 		FolderID:               folderID,

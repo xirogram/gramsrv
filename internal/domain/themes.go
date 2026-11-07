@@ -79,6 +79,7 @@ type Wallpaper struct {
 	Pattern    bool              `json:"pattern,omitempty"`
 	Dark       bool              `json:"dark,omitempty"`
 	Settings   WallpaperSettings `json:"settings,omitempty"`
+	Document   *Document         `json:"document,omitempty"`
 }
 
 // CloneWallpaperPtr returns a detached wallpaper pointer.
@@ -87,6 +88,10 @@ func CloneWallpaperPtr(in *Wallpaper) *Wallpaper {
 		return nil
 	}
 	out := *in
+	if in.Document != nil {
+		doc := in.Document.Clone()
+		out.Document = &doc
+	}
 	return &out
 }
 
@@ -95,7 +100,20 @@ func WallpaperEqual(a, b *Wallpaper) bool {
 	if a == nil || b == nil {
 		return a == nil && b == nil
 	}
-	return *a == *b
+	if a.ID != b.ID || a.AccessHash != b.AccessHash || a.Slug != b.Slug ||
+		a.NoFile != b.NoFile || a.Default != b.Default || a.Pattern != b.Pattern ||
+		a.Dark != b.Dark || a.Settings != b.Settings {
+		return false
+	}
+	if (a.Document == nil) != (b.Document == nil) {
+		return false
+	}
+	if a.Document != nil {
+		if a.Document.ID != b.Document.ID || a.Document.AccessHash != b.Document.AccessHash {
+			return false
+		}
+	}
+	return true
 }
 
 // ThemeSettingsSpec is the color scheme under one base theme (corresponding to themeSettings/inputThemeSettings).

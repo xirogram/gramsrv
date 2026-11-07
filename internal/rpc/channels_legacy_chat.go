@@ -462,11 +462,69 @@ func (r *Router) onMessagesSetChatTheme(ctx context.Context, req *tg.MessagesSet
 		if r.deps.Channels == nil {
 			return nil, notImplementedErr()
 		}
-		view, err := r.deps.Channels.GetChannel(ctx, userID, channelID)
-		if err != nil {
-			return nil, channelInvalidErr(err)
+		var wp *domain.Wallpaper
+		switch theme := req.Theme.(type) {
+		case nil, *tg.InputChatThemeEmpty:
+			wp = nil
+		case *tg.InputChatThemeUniqueGift:
+			if r.deps.Gifts == nil || theme.Slug == "" {
+				return nil, themeInvalidErr()
+			}
+			gift, found, err := r.deps.Gifts.UniqueBySlug(ctx, theme.Slug)
+			if err != nil || !found || gift.Burned || gift.OwnerAddress != "" || gift.Pattern.Document == nil {
+				return nil, themeInvalidErr()
+			}
+			wp = &domain.Wallpaper{
+				ID:         gift.Pattern.Document.ID,
+				AccessHash: gift.Pattern.Document.AccessHash,
+				Slug:       gift.Slug,
+				Pattern:    true,
+				Document:   gift.Pattern.Document,
+				Settings: domain.WallpaperSettings{
+					HasBackgroundColor:       true,
+					BackgroundColor:          gift.Backdrop.CenterColor,
+					HasSecondBackgroundColor: true,
+					SecondBackgroundColor:    gift.Backdrop.EdgeColor,
+					HasThirdBackgroundColor:  true,
+					ThirdBackgroundColor:     gift.Backdrop.PatternColor,
+					HasFourthBackgroundColor: true,
+					FourthBackgroundColor:    gift.Backdrop.TextColor,
+				},
+			}
+		case *tg.InputChatTheme:
+			if theme.Emoticon != "" && !tdesktop.IsChatThemeEmoticon(theme.Emoticon) {
+				return nil, themeInvalidErr()
+			}
+			if theme.Emoticon != "" {
+				wp = &domain.Wallpaper{
+					Settings: domain.WallpaperSettings{
+						HasEmoticon: true,
+						Emoticon:    theme.Emoticon,
+					},
+				}
+			}
+		default:
+			return nil, themeInvalidErr()
 		}
-		return r.channelStateUpdates(userID, view.Channel), nil
+
+		res, err := r.deps.Channels.SetWallpaper(ctx, userID, domain.SetChannelWallpaperRequest{
+			UserID:    userID,
+			ChannelID: channelID,
+			Wallpaper: wp,
+			Date:      int(r.clock.Now().Unix()),
+		})
+		if err != nil {
+			return nil, channelAdminErr(err)
+		}
+		r.invalidateRPCProjectionForChannel(res.Channel.ID)
+		if res.Changed && res.Event.Pts != 0 {
+			r.enqueueChannelWallpaperFanout(ctx, userID, res)
+		} else if res.Changed {
+			r.pushChannelUpdates(ctx, userID, res.Channel.ID, res.Recipients, func(viewerUserID int64) *tg.Updates {
+				return r.channelWallpaperUpdatesWithPeerCache(ctx, viewerUserID, res, nil)
+			})
+		}
+		return r.channelWallpaperUpdatesWithPeerCache(ctx, userID, res, nil), nil
 	} else if _, ok := channelIDFromLegacyInputPeer(userID, req.Peer); ok {
 		return nil, err
 	}
@@ -549,7 +607,7 @@ func (r *Router) onMessagesSetChatWallPaper(ctx context.Context, req *tg.Message
 	if err != nil {
 		return nil, err
 	}
-	wallpaper, err := domainWallpaperFromSetChatWallPaper(req)
+	wallpaper, err := r.domainWallpaperFromSetChatWallPaper(ctx, req)
 	if err != nil {
 		return nil, err
 	}

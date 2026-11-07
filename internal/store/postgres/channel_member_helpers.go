@@ -335,8 +335,10 @@ func scanChannelWithMember(row rowScanner) (domain.Channel, domain.ChannelMember
 	var member domain.ChannelMember
 	var defaultRights, reactionPolicy, adminRights, bannedRights string
 	var wallpaper *string
+	var collectibleID *int64
+	var collectibleJSON *string
 	var role, status string
-	dest := append(channelScanDest(&ch, &defaultRights, &reactionPolicy, &wallpaper),
+	dest := append(channelScanDest(&ch, &defaultRights, &reactionPolicy, &wallpaper, &collectibleID, &collectibleJSON),
 		&member.ChannelID, &member.UserID, &member.InviterUserID, &role, &status,
 		&member.JoinedAt, &member.LeftAt, &adminRights, &bannedRights, &member.Rank,
 		&member.AvailableMinID, &member.AvailableMinPts, &member.HistoryClearAnchorID, &member.HistoryClearAnchorDate,
@@ -347,7 +349,7 @@ func scanChannelWithMember(row rowScanner) (domain.Channel, domain.ChannelMember
 	}
 	member.Role = domain.ChannelMemberRole(role)
 	member.Status = domain.ChannelMemberStatus(status)
-	finishChannelScan(&ch, defaultRights, reactionPolicy, wallpaper)
+	finishChannelScan(&ch, defaultRights, reactionPolicy, wallpaper, collectibleID, collectibleJSON)
 	_ = json.Unmarshal([]byte(adminRights), &member.AdminRights)
 	_ = json.Unmarshal([]byte(bannedRights), &member.BannedRights)
 	return ch, member, nil
@@ -358,13 +360,15 @@ func scanChannelWithViewerMember(row rowScanner) (domain.Channel, bool, error) {
 	var viewerMember bool
 	var rights, reactionPolicy string
 	var wallpaper *string
-	dest := append(channelScanDest(&ch, &rights, &reactionPolicy, &wallpaper),
+	var collectibleID *int64
+	var collectibleJSON *string
+	dest := append(channelScanDest(&ch, &rights, &reactionPolicy, &wallpaper, &collectibleID, &collectibleJSON),
 		&viewerMember,
 	)
 	if err := row.Scan(dest...); err != nil {
 		return domain.Channel{}, false, err
 	}
-	finishChannelScan(&ch, rights, reactionPolicy, wallpaper)
+	finishChannelScan(&ch, rights, reactionPolicy, wallpaper, collectibleID, collectibleJSON)
 	return ch, viewerMember, nil
 }
 

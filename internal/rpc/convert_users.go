@@ -470,9 +470,27 @@ func tgChannelEmojiStatus(status domain.ChannelEmojiStatus) tg.EmojiStatusClass 
 	if status.Empty() {
 		return nil
 	}
+	if collectible := status.Collectible; !collectible.Empty() {
+		out := &tg.EmojiStatusCollectible{
+			CollectibleID:     collectible.CollectibleID,
+			DocumentID:        collectible.DocumentID,
+			Title:             collectible.Title,
+			Slug:              collectible.Slug,
+			PatternDocumentID: collectible.PatternDocumentID,
+			CenterColor:       collectible.CenterColor,
+			EdgeColor:         collectible.EdgeColor,
+			PatternColor:      collectible.PatternColor,
+			TextColor:         collectible.TextColor,
+		}
+		if status.Until > 0 {
+			out.SetUntil(status.Until)
+		}
+		return out
+	}
 	out := &tg.EmojiStatus{DocumentID: status.DocumentID}
 	if status.Until > 0 {
 		out.SetUntil(status.Until)
 	}
 	return out
 }
+

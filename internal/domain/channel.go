@@ -402,15 +402,33 @@ func (c ChannelPeerColor) Empty() bool {
 	return !c.HasColor && c.BackgroundEmojiID == 0
 }
 
-// ChannelEmojiStatus is a domain-only representation of a regular EmojiStatus.
+// ChannelEmojiStatus is a domain-only representation of an EmojiStatus or EmojiStatusCollectible.
 type ChannelEmojiStatus struct {
-	DocumentID int64
-	Until      int
+	DocumentID  int64                  `json:"document_id"`
+	Until       int                    `json:"until,omitempty"`
+	Collectible EmojiStatusCollectible `json:"collectible,omitempty"`
 }
 
 // Empty reports whether no emoji status is set.
 func (s ChannelEmojiStatus) Empty() bool {
-	return s.DocumentID == 0
+	return s.DocumentID == 0 && s.Collectible.Empty()
+}
+
+// Valid reports whether the channel emoji status is valid.
+func (s ChannelEmojiStatus) Valid() bool {
+	if s.Until < 0 {
+		return false
+	}
+	if s.Empty() {
+		return s.Until == 0
+	}
+	if s.DocumentID <= 0 {
+		return false
+	}
+	if s.Collectible.Empty() {
+		return true
+	}
+	return s.Collectible.Valid() && s.DocumentID == s.Collectible.DocumentID
 }
 
 // Channel is a Telegram channel/supergroup entity.

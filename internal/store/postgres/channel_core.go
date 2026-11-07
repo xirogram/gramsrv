@@ -509,17 +509,28 @@ func insertChannelTx(ctx context.Context, tx pgx.Tx, ch domain.Channel) error {
 	if err != nil {
 		return err
 	}
+	var collectibleID *int64
+	collectibleJSON := []byte(`{}`)
+	if !ch.EmojiStatus.Collectible.Empty() {
+		id := ch.EmojiStatus.Collectible.CollectibleID
+		collectibleID = &id
+		if raw, err := json.Marshal(ch.EmojiStatus.Collectible); err == nil {
+			collectibleJSON = raw
+		}
+	}
 	if _, err := tx.Exec(ctx, `
 INSERT INTO channels (
     id, access_hash, creator_user_id, title, about, username, verified, broadcast, megagroup, forum, forum_tabs,
     autotranslation, restricted_sponsored, broadcast_messages_allowed, send_paid_messages_stars,
     noforwards, join_to_send, join_request, signatures, pre_history_hidden, participants_hidden, antispam, linked_chat_id, slowmode_seconds, boosts_unrestrict, default_banned_rights, available_reactions,
     color_set, color, color_background_emoji_id, profile_color_set, profile_color, profile_color_background_emoji_id, emoji_status_document_id, emoji_status_until,
+    emoji_status_collectible_id, emoji_status_collectible,
     participants_count, admins_count, kicked_count, banned_count, top_message_id, pinned_message_id, pts, ttl_period, date, deleted, monoforum, linked_monoforum_id, signature_profiles
-) VALUES ($1,$2,$3,$4,$5,NULLIF($6,''),$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47,$48)`,
+) VALUES ($1,$2,$3,$4,$5,NULLIF($6,''),$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37::jsonb,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47,$48,$49,$50)`,
 		ch.ID, ch.AccessHash, ch.CreatorUserID, ch.Title, ch.About, ch.Username, ch.Verified, ch.Broadcast, ch.Megagroup, ch.Forum,
 		ch.ForumTabs, ch.Autotranslation, ch.RestrictedSponsored, ch.BroadcastMessagesAllowed, ch.SendPaidMessagesStars, ch.NoForwards, ch.JoinToSend, ch.JoinRequest, ch.Signatures, ch.PreHistoryHidden, ch.ParticipantsHidden, ch.AntiSpam, ch.LinkedChatID, ch.SlowmodeSeconds, ch.BoostsUnrestrict, rights, reactions,
 		ch.Color.HasColor, ch.Color.Color, ch.Color.BackgroundEmojiID, ch.ProfileColor.HasColor, ch.ProfileColor.Color, ch.ProfileColor.BackgroundEmojiID, ch.EmojiStatus.DocumentID, ch.EmojiStatus.Until,
+		collectibleID, string(collectibleJSON),
 		ch.ParticipantsCount, ch.AdminsCount,
 		ch.KickedCount, ch.BannedCount, ch.TopMessageID, ch.PinnedMessageID, ch.Pts, ch.TTLPeriod, ch.Date, ch.Deleted, ch.Monoforum, ch.LinkedMonoforumID, ch.SignatureProfiles); err != nil {
 		return fmt.Errorf("insert channel: %w", err)
@@ -531,18 +542,21 @@ func scanChannel(row rowScanner) (domain.Channel, error) {
 	var ch domain.Channel
 	var rights, reactionPolicy string
 	var wallpaper *string
-	if err := row.Scan(channelScanDest(&ch, &rights, &reactionPolicy, &wallpaper)...); err != nil {
+	var collectibleID *int64
+	var collectibleJSON *string
+	if err := row.Scan(channelScanDest(&ch, &rights, &reactionPolicy, &wallpaper, &collectibleID, &collectibleJSON)...); err != nil {
 		return domain.Channel{}, err
 	}
-	finishChannelScan(&ch, rights, reactionPolicy, wallpaper)
+	finishChannelScan(&ch, rights, reactionPolicy, wallpaper, collectibleID, collectibleJSON)
 	return ch, nil
 }
 
-func channelScanDest(ch *domain.Channel, rights, reactionPolicy *string, wallpaper **string) []any {
+func channelScanDest(ch *domain.Channel, rights, reactionPolicy *string, wallpaper **string, collectibleID **int64, collectibleJSON **string) []any {
 	return []any{
 		&ch.ID, &ch.AccessHash, &ch.CreatorUserID, &ch.Title, &ch.About, &ch.Username, &ch.Verified, &ch.Scam, &ch.Fake, &ch.Gigagroup,
 		&ch.Broadcast, &ch.Megagroup, &ch.Forum, &ch.ForumTabs, &ch.Autotranslation, &ch.RestrictedSponsored, &ch.BroadcastMessagesAllowed, &ch.SendPaidMessagesStars, &ch.NoForwards, &ch.JoinToSend, &ch.JoinRequest, &ch.Signatures, &ch.SignatureProfiles, &ch.PreHistoryHidden, &ch.ParticipantsHidden, &ch.AntiSpam, &ch.HasLink, &ch.LinkedChatID, &ch.LinkedCommunityID, &ch.Monoforum, &ch.LinkedMonoforumID, &ch.SlowmodeSeconds, &ch.BoostsUnrestrict, rights,
 		reactionPolicy, &ch.Color.HasColor, &ch.Color.Color, &ch.Color.BackgroundEmojiID, &ch.ProfileColor.HasColor, &ch.ProfileColor.Color, &ch.ProfileColor.BackgroundEmojiID, &ch.EmojiStatus.DocumentID, &ch.EmojiStatus.Until,
+		collectibleID, collectibleJSON,
 		wallpaper, &ch.ParticipantsCount,
 		&ch.FakeParticipants, &ch.AdminsCount, &ch.KickedCount, &ch.BannedCount, &ch.TopMessageID,
 		&ch.PinnedMessageID, &ch.Pts, &ch.TTLPeriod, &ch.Date, &ch.Deleted,
@@ -551,11 +565,17 @@ func channelScanDest(ch *domain.Channel, rights, reactionPolicy *string, wallpap
 	}
 }
 
-func finishChannelScan(ch *domain.Channel, rights, reactionPolicy string, wallpaper *string) {
+func finishChannelScan(ch *domain.Channel, rights, reactionPolicy string, wallpaper *string, collectibleID *int64, collectibleJSON *string) {
 	_ = json.Unmarshal([]byte(rights), &ch.DefaultBannedRights)
 	_ = json.Unmarshal([]byte(reactionPolicy), &ch.ReactionPolicy)
 	if wallpaper != nil {
 		ch.Wallpaper = decodeJSONPtr[domain.Wallpaper](*wallpaper)
+	}
+	if collectibleID != nil && *collectibleID > 0 && collectibleJSON != nil && *collectibleJSON != "" && *collectibleJSON != "{}" {
+		var col domain.EmojiStatusCollectible
+		if err := json.Unmarshal([]byte(*collectibleJSON), &col); err == nil && col.Valid() {
+			ch.EmojiStatus.Collectible = col
+		}
 	}
 }
 

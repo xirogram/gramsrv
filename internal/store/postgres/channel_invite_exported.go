@@ -481,7 +481,9 @@ WHERE h.hash = $1 AND NOT i.revoked`+lockClause, hash)
 	var invite domain.ChannelInvite
 	var rights, reactionPolicy string
 	var wallpaper *string
-	dest := append(channelScanDest(&ch, &rights, &reactionPolicy, &wallpaper),
+	var collectibleID *int64
+	var collectibleJSON *string
+	dest := append(channelScanDest(&ch, &rights, &reactionPolicy, &wallpaper, &collectibleID, &collectibleJSON),
 		&invite.ChannelID, &invite.InviteID, &invite.Hash, &invite.AdminUserID, &invite.Title,
 		&invite.Permanent, &invite.Revoked, &invite.RequestNeeded, &invite.ExpireDate,
 		&invite.UsageLimit, &invite.UsageCount, &invite.RequestedCount, &invite.Date,
@@ -492,7 +494,7 @@ WHERE h.hash = $1 AND NOT i.revoked`+lockClause, hash)
 		}
 		return domain.Channel{}, domain.ChannelInvite{}, err
 	}
-	finishChannelScan(&ch, rights, reactionPolicy, wallpaper)
+	finishChannelScan(&ch, rights, reactionPolicy, wallpaper, collectibleID, collectibleJSON)
 	return ch, invite, nil
 }
 
