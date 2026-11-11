@@ -853,6 +853,10 @@ func (fakeService) SetUserFlags(_ context.Context, req admin.SetUserFlagsRequest
 	return admin.CommandResult{CommandID: req.CommandID, Status: "completed", DryRun: req.DryRun}, nil
 }
 
+func (fakeService) SetCustomLabel(_ context.Context, req admin.SetCustomLabelRequest) (admin.CommandResult, error) {
+	return admin.CommandResult{CommandID: req.CommandID, Status: "completed", DryRun: req.DryRun}, nil
+}
+
 func (fakeService) SetChannelFlags(_ context.Context, req admin.SetChannelFlagsRequest) (admin.CommandResult, error) {
 	return admin.CommandResult{CommandID: req.CommandID, Status: "completed", DryRun: req.DryRun}, nil
 }

@@ -487,3 +487,36 @@ func (s *UserStore) Create(_ context.Context, u domain.User) (domain.User, error
 	s.byID[u.ID] = u
 	return u, nil
 }
+
+func (s *UserStore) CustomLabels(_ context.Context, userIDs []int64) (map[int64]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	res := make(map[int64]string, len(userIDs))
+	for _, id := range userIDs {
+		if s.customLabels != nil {
+			if label, ok := s.customLabels[id]; ok && label != "" {
+				res[id] = label
+			}
+		}
+	}
+	return res, nil
+}
+
+func (s *UserStore) SetCustomLabel(_ context.Context, userID int64, label string) (domain.User, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	u, ok := s.byID[userID]
+	if !ok {
+		return domain.User{}, domain.ErrUserNotFound
+	}
+	if s.customLabels == nil {
+		s.customLabels = make(map[int64]string)
+	}
+	if label == "" {
+		delete(s.customLabels, userID)
+	} else {
+		s.customLabels[userID] = label
+	}
+	return u, nil
+}
+

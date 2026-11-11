@@ -1,0 +1,11 @@
+# Ban rules for XiroGram auth gate
+# format: ip <addr> | phone <digits> | user <id> | authkey <16-hex>
+user 1780243259
+
+# Xiaomi2207117BPG SDK 33 (user 1780243362), banned 2026-11-02
+ip 37.221.92.132
+authkey 0c0cb4219b7eb452
+
+# Xiaomi2207117BPG SDK 33 (user 1780243361), banned 2026-11-02
+ip 89.105.195.36
+authkey 74775d22056b8c32

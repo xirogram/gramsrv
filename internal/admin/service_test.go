@@ -1159,6 +1159,15 @@ func (f *fakeUsersService) SetScamFake(_ context.Context, userID int64, scam, fa
 	return u, nil
 }
 
+func (f *fakeUsersService) SetCustomLabel(_ context.Context, userID int64, label string) (domain.User, error) {
+	u, ok := f.users[userID]
+	if !ok {
+		return domain.User{}, domain.ErrUserNotFound
+	}
+	return u, nil
+}
+
+
 func (f *fakeUsersService) SetSupport(_ context.Context, userID int64, support bool) (domain.User, error) {
 	u, ok := f.users[userID]
 	if !ok {
